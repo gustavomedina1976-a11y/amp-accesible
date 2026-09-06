@@ -1,5 +1,5 @@
 #define MyAppName "Amp Accessible"
-#define MyAppVersion "2.41.58"
+#define MyAppVersion "2.41.59"
 #define MyAppPublisher "GDM"
 #define MyAppExeName "AmpAccessible.exe"
 
