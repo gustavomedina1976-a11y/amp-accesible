@@ -41,11 +41,14 @@ jobs:
         run: |
           $tag = '${{ steps.version.outputs.tag }}'
           gh release view $tag --repo '${{ github.repository }}' *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $releaseExists = ($LASTEXITCODE -eq 0)
+          $global:LASTEXITCODE = 0
+          if ($releaseExists) {
             'exists=true' >> $env:GITHUB_OUTPUT
             Write-Host "La release $tag ya existe. No se publica de nuevo."
           } else {
             'exists=false' >> $env:GITHUB_OUTPUT
+            Write-Host "La release $tag todavia no existe. Se continuara con la compilacion."
           }
 
       - name: Restaurar dependencias
@@ -99,6 +102,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path 'artifacts\incremental' | Out-Null
           New-Item -ItemType Directory -Force -Path 'artifacts\previous' | Out-Null
           $releases = gh release list --repo '${{ github.repository }}' --limit 50 --json tagName | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'No se pudo consultar la lista de Releases.' }
           foreach ($release in $releases) {
             $tag = [string]$release.tagName
             if ($tag -notmatch '^v(?<v>[0-9]+\.[0-9]+\.[0-9]+)$') { continue }
@@ -109,7 +113,11 @@ jobs:
             $download = Join-Path $PWD "artifacts\previous\$previous"
             New-Item -ItemType Directory -Force -Path $download | Out-Null
             gh release download $tag --repo '${{ github.repository }}' --pattern "Amp_Accessible_${previous}_Publicacion.zip" --dir $download --clobber
-            if ($LASTEXITCODE -ne 0) { Write-Warning "Sin publicacion base para $previous"; continue }
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning "Sin publicacion base para $previous"
+              $global:LASTEXITCODE = 0
+              continue
+            }
             $zip = Join-Path $download "Amp_Accessible_${previous}_Publicacion.zip"
             if (-not (Test-Path $zip)) { continue }
             $old = Join-Path $download 'extraido'
@@ -117,6 +125,7 @@ jobs:
             $out = Join-Path $PWD "artifacts\incremental\Amp_Accessible_${previous}_a_${current}.gdmupdate"
             & 'Installer\CREAR_PAQUETE_ACTUALIZACION.ps1' -Anterior $old -Nuevo (Join-Path $PWD 'artifacts\publish') -Desde $previous -Hasta $current -Salida $out
           }
+          $global:LASTEXITCODE = 0
 
       - name: Generar manifiesto del canal
         if: steps.existing.outputs.exists != 'true'
@@ -154,3 +163,4 @@ jobs:
           $version='${{ steps.version.outputs.version }}'
           $assets = Get-ChildItem -LiteralPath 'artifacts\release' -File | Where-Object { $_.Name -ne 'NOTAS_RELEASE.txt' } | ForEach-Object { $_.FullName }
           gh release create $tag @assets --repo '${{ github.repository }}' --target '${{ github.sha }}' --title "Amp Accessible $version" --notes-file 'artifacts\release\NOTAS_RELEASE.txt'
+          if ($LASTEXITCODE -ne 0) { throw 'No se pudo crear la GitHub Release.' }
