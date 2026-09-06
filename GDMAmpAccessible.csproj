@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>AmpAccessible</AssemblyName>
+    <RootNamespace>GDMAmpAccessible</RootNamespace>
+    <Version>2.41.58</Version>
+    <FileVersion>2.41.58.0</FileVersion>
+    <AssemblyVersion>2.41.58.0</AssemblyVersion>
+  </PropertyGroup>
+
+  <!-- El motor NAM se descarga dentro de MOTOR_NAM.
+       Sus proyectos C# de ejemplo tienen su propio Program.cs y no forman
+       parte de Amp Accessible. Los excluimos de la compilacion principal. -->
+  <ItemGroup>
+    <Compile Remove="MOTOR_NAM\**\*.cs" />
+    <Compile Remove="Installer\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="update-channel.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,156 @@
+name: Publicar actualizacion de Amp Accessible
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publicar:
+    runs-on: windows-latest
+    steps:
+      - name: Descargar codigo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Preparar .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Leer version del proyecto
+        id: version
+        shell: pwsh
+        run: |
+          [xml]$project = Get-Content -LiteralPath 'GDMAmpAccessible.csproj'
+          $version = [string]$project.Project.PropertyGroup.Version
+          if ([string]::IsNullOrWhiteSpace($version)) { throw 'No se pudo leer Version del csproj.' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version"
+
+      - name: Evitar republicar la misma version
+        id: existing
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ steps.version.outputs.tag }}'
+          gh release view $tag --repo '${{ github.repository }}' *> $null
+          if ($LASTEXITCODE -eq 0) {
+            'exists=true' >> $env:GITHUB_OUTPUT
+            Write-Host "La release $tag ya existe. No se publica de nuevo."
+          } else {
+            'exists=false' >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Restaurar dependencias
+        if: steps.existing.outputs.exists != 'true'
+        run: dotnet restore GDMAmpAccessible.csproj
+
+      - name: Publicar Windows x64 autocontenido
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $publish = Join-Path $PWD 'artifacts\publish'
+          dotnet publish GDMAmpAccessible.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o $publish
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet publish fallo.' }
+          if (Test-Path 'HISTORIAL_Y_GUIA.txt') { Copy-Item 'HISTORIAL_Y_GUIA.txt' $publish -Force }
+          if (Test-Path 'NeuralAudioCAPI.dll') { Copy-Item 'NeuralAudioCAPI.dll' $publish -Force }
+          & 'Installer\GitHub\CONFIGURAR_PUBLICACION_GITHUB.ps1' -Repositorio '${{ github.repository }}' -DirectorioPublicacion $publish
+
+      - name: Crear ZIP completo de la publicacion
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $version='${{ steps.version.outputs.version }}'
+          New-Item -ItemType Directory -Force -Path 'artifacts\release' | Out-Null
+          Compress-Archive -Path 'artifacts\publish\*' -DestinationPath "artifacts\release\Amp_Accessible_${version}_Publicacion.zip" -CompressionLevel Optimal
+
+      - name: Instalar Inno Setup
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Crear instalador unico
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          if (Test-Path 'PUBLICACION_AUTOCONTENIDA') { Remove-Item 'PUBLICACION_AUTOCONTENIDA' -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path 'PUBLICACION_AUTOCONTENIDA' | Out-Null
+          Copy-Item 'artifacts\publish\*' 'PUBLICACION_AUTOCONTENIDA' -Recurse -Force
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' 'Installer\AmpAccessible.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup fallo.' }
+          $version='${{ steps.version.outputs.version }}'
+          Copy-Item 'Installer\Salida\Amp_Accessible_Setup.exe' "artifacts\release\Amp_Accessible_${version}_Setup.exe" -Force
+
+      - name: Crear paquetes incrementales desde versiones publicadas anteriores
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $current='${{ steps.version.outputs.version }}'
+          New-Item -ItemType Directory -Force -Path 'artifacts\incremental' | Out-Null
+          New-Item -ItemType Directory -Force -Path 'artifacts\previous' | Out-Null
+          $releases = gh release list --repo '${{ github.repository }}' --limit 50 --json tagName | ConvertFrom-Json
+          foreach ($release in $releases) {
+            $tag = [string]$release.tagName
+            if ($tag -notmatch '^v(?<v>[0-9]+\.[0-9]+\.[0-9]+)$') { continue }
+            $previous = $Matches.v
+            try {
+              if ([version]$previous -ge [version]$current) { continue }
+            } catch { continue }
+            $download = Join-Path $PWD "artifacts\previous\$previous"
+            New-Item -ItemType Directory -Force -Path $download | Out-Null
+            gh release download $tag --repo '${{ github.repository }}' --pattern "Amp_Accessible_${previous}_Publicacion.zip" --dir $download --clobber
+            if ($LASTEXITCODE -ne 0) { Write-Warning "Sin publicacion base para $previous"; continue }
+            $zip = Join-Path $download "Amp_Accessible_${previous}_Publicacion.zip"
+            if (-not (Test-Path $zip)) { continue }
+            $old = Join-Path $download 'extraido'
+            Expand-Archive -LiteralPath $zip -DestinationPath $old -Force
+            $out = Join-Path $PWD "artifacts\incremental\Amp_Accessible_${previous}_a_${current}.gdmupdate"
+            & 'Installer\CREAR_PAQUETE_ACTUALIZACION.ps1' -Anterior $old -Nuevo (Join-Path $PWD 'artifacts\publish') -Desde $previous -Hasta $current -Salida $out
+          }
+
+      - name: Generar manifiesto del canal
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          & 'Installer\GitHub\GENERAR_CANAL_ACTUALIZACION.ps1' `
+            -Repositorio '${{ github.repository }}' `
+            -Version '${{ steps.version.outputs.version }}' `
+            -Tag '${{ steps.version.outputs.tag }}' `
+            -DirectorioPaquetes (Join-Path $PWD 'artifacts\incremental') `
+            -Salida (Join-Path $PWD 'artifacts\release\update-channel.json')
+          Copy-Item 'artifacts\incremental\*.gdmupdate' 'artifacts\release' -Force -ErrorAction SilentlyContinue
+
+      - name: Preparar notas de la release
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: |
+          $version='${{ steps.version.outputs.version }}'
+          @"
+          Amp Accessible $version
+
+          Canal automatico de pruebas mediante GitHub Releases.
+          El boton Buscar actualizaciones puede descargar paquetes incrementales con verificacion SHA-256.
+
+          Importante: la publicacion automatica no borra NAM, IR, presets, escenas ni configuraciones personales existentes.
+          "@ | Set-Content 'artifacts\release\NOTAS_RELEASE.txt' -Encoding UTF8
+
+      - name: Crear GitHub Release y subir archivos
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag='${{ steps.version.outputs.tag }}'
+          $version='${{ steps.version.outputs.version }}'
+          $assets = Get-ChildItem -LiteralPath 'artifacts\release' -File | Where-Object { $_.Name -ne 'NOTAS_RELEASE.txt' } | ForEach-Object { $_.FullName }
+          gh release create $tag @assets --repo '${{ github.repository }}' --target '${{ github.sha }}' --title "Amp Accessible $version" --notes-file 'artifacts\release\NOTAS_RELEASE.txt'

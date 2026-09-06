@@ -1,0 +1,33 @@
+AMP ACCESSIBLE 2.41.58 - CANAL AUTOMATICO DE PRUEBAS POR GITHUB
+
+OBJETIVO
+Desde esta version el proyecto incluye un flujo de GitHub Actions que puede compilar y publicar automaticamente cada nueva version para Windows x64.
+
+COMO FUNCIONA
+1. El numero de version se cambia en GDMAmpAccessible.csproj y AppInfo.cs.
+2. Al subir ese cambio a la rama main, GitHub Actions comprueba si ya existe una Release con ese numero.
+3. Si no existe, compila Amp Accessible autocontenido para Windows x64.
+4. Genera un ZIP completo y un instalador unico.
+5. Descarga las publicaciones anteriores disponibles y crea paquetes .gdmupdate directos desde cada una hacia la version nueva.
+6. Calcula SHA-256 para cada paquete.
+7. Publica update-channel.json en la Release nueva.
+8. Las compilaciones hechas por GitHub reciben automaticamente como canal:
+   https://github.com/PROPIETARIO/REPOSITORIO/releases/latest/download/update-channel.json
+9. En la PC, Buscar actualizaciones descarga solo el paquete incremental correspondiente a la version instalada.
+
+PRIMERA PUESTA EN MARCHA
+La 2.41.58 debe publicarse e instalarse una vez desde el instalador generado por GitHub. A partir de la version siguiente, Buscar actualizaciones puede encargarse de las pruebas incrementales.
+
+SEGURIDAD
+- Los paquetes se verifican con SHA-256 antes de instalar.
+- El actualizador reemplaza solamente los archivos declarados en el paquete.
+- No elimina NeuralAudioCAPI.dll, NAM, IR, presets, escenas ni configuraciones personales que no formen parte de la publicacion automatica.
+- El canal exige HTTPS.
+
+ARCHIVOS NUEVOS
+.github/workflows/publicar-actualizacion.yml
+Installer/GitHub/CONFIGURAR_PUBLICACION_GITHUB.ps1
+Installer/GitHub/GENERAR_CANAL_ACTUALIZACION.ps1
+
+NOTA
+El repositorio GitHub debe permitir Actions y el workflow necesita permiso Contents: write, ya declarado en el archivo YAML.

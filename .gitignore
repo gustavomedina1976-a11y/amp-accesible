@@ -1,0 +1,8 @@
+bin/
+obj/
+PUBLICACION/
+PUBLICACION_AUTOCONTENIDA/
+Installer/Salida/
+*.gdmupdate
+*.user
+.vs/

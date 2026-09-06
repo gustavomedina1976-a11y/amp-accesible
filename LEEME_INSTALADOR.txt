@@ -1,0 +1,8 @@
+AMP ACCESSIBLE 2.41.58 - INSTALADOR UNICO
+NOVEDAD 2.41.58: integración del canal automático de pruebas con GitHub Actions y Releases. La compilación generada en GitHub incorpora automáticamente la dirección HTTPS de Buscar actualizaciones.
+
+AUDIO: sin cambios respecto de Amp Accessible 2.41.57 estable.
+
+El instalador conserva la carpeta de instalación y no está diseñado para eliminar NAM, IR, presets, escenas ni datos personales existentes.
+Para crear el instalador localmente use CREAR_INSTALADOR_UNICO.bat.
+Para publicación automática consulte GITHUB_ACTUALIZACIONES_LEEME.txt.

@@ -1,0 +1,9 @@
+AMP ACCESSIBLE 2.41.58 - IMPORTANTE
+NOVEDAD 2.41.58: infraestructura para actualizaciones automáticas de prueba mediante GitHub Actions y GitHub Releases. No hay cambios de audio respecto de la base estable 2.41.57.
+
+1. Extraiga TODO el ZIP antes de compilar o ejecutar los archivos BAT.
+2. Abra la carpeta Amp_Accessible_v2.41.58 extraída.
+3. Para compilar localmente puede seguir usando COMPILAR.bat o COMPILAR_AUTOCONTENIDO.bat.
+4. Para el canal automático consulte GITHUB_ACTUALIZACIONES_LEEME.txt.
+
+IMPORTANTE: el archivo update-channel.json del código fuente queda sin servidor fijo. GitHub Actions escribe automáticamente la URL HTTPS correcta dentro de la publicación que genera para cada repositorio.

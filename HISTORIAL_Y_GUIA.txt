@@ -1,0 +1,8 @@
+Amp Accessible 2.41.58 - Actualizaciones GitHub Automáticas JAWS
+NOVEDAD 2.41.58: se incorpora el flujo de publicación automática mediante GitHub Actions y GitHub Releases. Al publicar una versión nueva, GitHub puede compilar Windows x64 autocontenido, generar el instalador, crear paquetes incrementales .gdmupdate y publicar update-channel.json con verificación SHA-256.
+NOVEDAD 2.41.58: las compilaciones generadas por GitHub reciben automáticamente el canal HTTPS del repositorio. El botón Buscar actualizaciones puede usar ese canal sin editar manualmente la publicación.
+IMPORTANTE 2.41.58: no se modifica ningún algoritmo de audio. Batería, bajo, piano, Hammond, amplificadores, NAM, IR, efectos, escenas, F12 y looper quedan exactamente sobre la base estable 2.41.57.
+
+Amp Accessible 2.41.57 - Batería Fraseo Humano y Fills de Toms JAWS
+NOVEDAD 2.41.57: el patrón deja de repetirse de forma idéntica. Rock, Worship y Pop alternan discretamente algunos golpes secundarios de bombo entre compases, sin cambiar el pulso principal.
+NOVEDAD 2.41.57: se agrega respiración dinámica de cuatro compases, fills suaves de caja en el cuarto compás y un recorrido de tom alto, medio y piso sólo cada ocho compases.

@@ -1,0 +1,3 @@
+2.41.58: canal automático de pruebas por GitHub Actions y GitHub Releases. La compilación publicada por GitHub recibe automáticamente la URL HTTPS del manifiesto update-channel.json, genera paquetes incrementales .gdmupdate, calcula SHA-256 y los publica junto al instalador y al ZIP autocontenido. No se modifica el DSP ni el audio de la base estable 2.41.57.
+
+2.41.57: batería con fraseo más humano. Alterna sutilmente algunos bombos entre compases, incorpora respiración dinámica y combina fills discretos de caja con recorridos de tom alto, medio y piso cada ocho compases. Mantiene los platillos cálidos, la ganancia 1.45, F12, BPM, piano, bajo y escenas.
