@@ -166,11 +166,13 @@ internal static class UpdateService
     private static string BuildApplyScript(string payload, UpdatePackageManifest manifest)
     {
         string appDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
-        string exe = Environment.ProcessPath ?? Path.Combine(appDir, "AmpAccessible.exe");
+        string exe = Path.Combine(appDir, "AmpAccessible.exe");
         var sb = new StringBuilder();
         sb.AppendLine("param([int]$PidToWait)");
         sb.AppendLine("$ErrorActionPreference = 'Stop'");
-        sb.AppendLine("try { Wait-Process -Id $PidToWait -ErrorAction SilentlyContinue } catch {}");
+        sb.AppendLine("$deadline = (Get-Date).AddSeconds(12)");
+        sb.AppendLine("while ((Get-Process -Id $PidToWait -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) { Start-Sleep -Milliseconds 250 }");
+        sb.AppendLine("if (Get-Process -Id $PidToWait -ErrorAction SilentlyContinue) { Stop-Process -Id $PidToWait -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800 }");
         sb.AppendLine("Start-Sleep -Milliseconds 600");
         sb.AppendLine($"$app = '{Ps(appDir)}'");
         sb.AppendLine($"$payload = '{Ps(payload)}'");
@@ -188,8 +190,10 @@ internal static class UpdateService
             sb.AppendLine($"$old = Join-Path $app '{Ps(rel)}'");
             sb.AppendLine("if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Force -Recurse }");
         }
-        sb.AppendLine($"Start-Process -FilePath '{Ps(exe)}'");
-        sb.AppendLine("Start-Sleep -Seconds 2");
+        sb.AppendLine($"$newProcess = Start-Process -FilePath '{Ps(exe)}' -WorkingDirectory '{Ps(appDir)}' -PassThru");
+        sb.AppendLine("Start-Sleep -Seconds 3");
+        sb.AppendLine("$newProcess.Refresh()");
+        sb.AppendLine("if ($newProcess.HasExited) { throw ('Amp Accessible se cerro durante el reinicio. Codigo ' + $newProcess.ExitCode) }");
         sb.AppendLine("Remove-Item -LiteralPath $PSScriptRoot -Force -Recurse -ErrorAction SilentlyContinue");
         return sb.ToString();
     }
