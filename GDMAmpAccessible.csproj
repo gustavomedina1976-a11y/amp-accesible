@@ -10,9 +10,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>AmpAccessible</AssemblyName>
     <RootNamespace>GDMAmpAccessible</RootNamespace>
-    <Version>2.41.64</Version>
-    <FileVersion>2.41.64.0</FileVersion>
-    <AssemblyVersion>2.41.64.0</AssemblyVersion>
+    <Version>2.41.65</Version>
+    <FileVersion>2.41.65.0</FileVersion>
+    <AssemblyVersion>2.41.65.0</AssemblyVersion>
   </PropertyGroup>
 
   <!-- El motor NAM se descarga dentro de MOTOR_NAM.

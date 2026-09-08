@@ -337,7 +337,7 @@ internal sealed class DrumMachineGenerator
                 ghostSnare = false;
                 if (step >= 14) hat = false;
             }
-            else if (snareFillBar && step is 13 or 14 or 15)             {                 snare = true;                 ghostSnare = false;                 float rollScale = _pattern == 3 ? 0.90f : _pattern == 1 ? 0.96f : 1.0f;                 snareVelocity = (step == 13 ? 0.53f : step == 14 ? 0.70f : 0.88f) * rollScale;                 if (step >= 14)                 {                     hat = false;                     ride = false;                 }             }
+            else if (snareFillBar && step is 13 or 14 or 15)             {                 snare = true;                 ghostSnare = false;                 float rollScale = _pattern == 3 ? 0.90f : _pattern == 1 ? 0.96f : 1.0f;                 snareVelocity = (step == 13 ? 0.58f : step == 14 ? 0.77f : 0.96f) * rollScale;                 if (step >= 14)                 {                     hat = false;                     ride = false;                 }             }
         }
         else
         {
@@ -351,7 +351,7 @@ internal sealed class DrumMachineGenerator
                 ghostSnare = false;
                 if (step >= 10) hat = false;
             }
-            else if (snareFillBar &&                      ((_pattern == 4 && (step is 10 or 11)) ||                       (_pattern == 5 && (step is 9 or 10 or 11))))             {                 snare = true;                 ghostSnare = false;                 snareVelocity = _pattern == 4                     ? (step == 10 ? 0.65f : 0.86f)                     : (step == 9 ? 0.49f : step == 10 ? 0.66f : 0.84f);                 hat = false;                 ride = false;             }
+            else if (snareFillBar &&                      ((_pattern == 4 && (step is 10 or 11)) ||                       (_pattern == 5 && (step is 9 or 10 or 11))))             {                 snare = true;                 ghostSnare = false;                 snareVelocity = _pattern == 4                     ? (step == 10 ? 0.71f : 0.94f)                     : (step == 9 ? 0.54f : step == 10 ? 0.72f : 0.92f);                 hat = false;                 ride = false;             }
         }
 
         // Crescendo/relajación microscópicos dentro de cada grupo de cuatro compases.
