@@ -7785,8 +7785,11 @@ public sealed class MainForm : Form, IMessageFilter
             : _engine.IsLoopOverdubbing
                 ? $"overdub desde {CurrentLoopCaptureSourceName}"
                 : _engine.IsLoopPlaying ? "reproduciendo" : "detenido";
-        text.AppendLine($"Grabadora: {(_engine.IsPracticeRecording ? "grabando" : "detenida")}; looper: {looperDiagnosticState}");
+        text.AppendLine(_engine.PracticeRecordingTelemetry);
+        text.AppendLine($"Looper: {looperDiagnosticState}");
         if (!string.IsNullOrWhiteSpace(_audioDiagnostics.LastSavedPath)) text.AppendLine($"Último diagnóstico guardado: {_audioDiagnostics.LastSavedPath}");
+        text.AppendLine(_engine.PracticeRecordingDiagnostic);
+        text.AppendLine($"Informe de grabadora: {_engine.PracticeRecordingDiagnosticPath}");
         return text.ToString().TrimEnd();
     }
 
@@ -9797,7 +9800,9 @@ public sealed class MainForm : Form, IMessageFilter
             {
                 string reason = autoCompleted ? "Grabación completada automáticamente" : "Grabación detenida";
                 _practiceRecordingStatus.Text = $"{reason}. Guardada en {path}";
-                SetStatus($"{reason}. WAV guardado en {path}.");
+                SetStatus(_engine.LastPracticeRecording?.SignalDetected == false
+                    ? "Grabación guardada, pero no se detectó señal de audio útil. Revise Alt+D para diagnóstico de grabadora."
+                    : $"{reason}. WAV guardado en {path}.");
             }
         }
         catch (Exception ex)

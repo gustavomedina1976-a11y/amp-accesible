@@ -768,13 +768,40 @@ internal sealed class AudioEngine : IDisposable
         {
             throw new InvalidOperationException("Inicie primero el audio con F4 antes de grabar.");
         }
-        return _practiceRecorder.Start(minutes);
+        return _practiceRecorder.Start(minutes, RecorderContext());
     }
 
     public Task<string?> StopAndSavePracticeRecordingAsync()
     {
-        return _practiceRecorder.StopAndSaveAsync();
+        return _practiceRecorder.StopAndSaveAsync(RecorderContext());
     }
+
+    public string PracticeRecordingDiagnostic => _practiceRecorder.DiagnosticSummary;
+    public string? PracticeRecordingDiagnosticPath => _practiceRecorder.DiagnosticPath;
+    public RecordingSnapshot? LastPracticeRecording => _practiceRecorder.LastRecording;
+    public string PracticeRecordingTelemetry
+    {
+        get
+        {
+            bool current = IsPracticeRecording || HasPendingPracticeRecording;
+            var last = _practiceRecorder.LastRecording;
+            if (!current && last is null) return "Grabadora: detenida; sin WAV guardado.";
+            double seconds = current ? _practiceRecorder.TotalCapturedSeconds : last!.Seconds;
+            double db = current ? _practiceRecorder.MaximumReceivedPeakDbfs : last!.PeakDbfs;
+            long samples = current ? _practiceRecorder.TotalCapturedSamples : last!.Samples;
+            long signalSamples = current ? _practiceRecorder.SignalSamples : last!.SignalSamples;
+            bool signal = current ? _practiceRecorder.SignalDetected : last!.SignalDetected;
+            int dspMaximum = current ? _practiceRecorder.RecordingDspMaximum : last!.Diagnostics.DspMaximum;
+            long deadlines = current ? _practiceRecorder.RecordingDspDeadlines : last!.Diagnostics.DspDeadlines;
+            string state = IsPracticeRecording ? "GRABANDO" : current ? "detenida; PENDIENTE DE GUARDAR" : "detenida; ultima grabacion";
+            return $"Grabadora: {state}; tiempo {seconds:F1} s; muestras {samples}; pico {db:F1} dBFS; " +
+                $"señal detectada {(signal ? "sí" : "NO - la grabadora recibió silencio o valores prácticamente cero")}; muestras con señal {signalSamples}; " +
+                $"DSP máximo durante grabación {dspMaximum} %; plazos excedidos durante grabación {deadlines}" +
+                (!current ? $"; archivo {Path.GetFileName(last!.Path)}" : "") + ".";
+        }
+    }
+    private string RecorderContext() =>
+        $"driver={SessionDriverName}; activo={IsRunning}; buffer={ActualBufferSize}; callbacks={CallbackCount}; errores entrada={InputReadErrorCount}; DSP={DspErrorCount}; salida={OutputWriteErrorCount}; buffer={BufferErrorCount}; master={MasterOutputPeak}; guitarra1={Guitar1RawPeak}; guitarra2={Guitar2RawPeak}; voz={VoiceRawPeak}";
 
     public void CancelPracticeRecording()
     {
@@ -945,6 +972,7 @@ internal sealed class AudioEngine : IDisposable
     private void OnAudioAvailable(object? sender, AsioAudioAvailableEventArgs e)
     {
         long callbackStart = Stopwatch.GetTimestamp();
+        RecorderDiagnostics? recordingDiagnostics = _practiceRecorder.ActiveDiagnostics;
         Interlocked.Exchange(ref _lastCallbackTimestamp, callbackStart);
         Interlocked.Increment(ref _callbackCount);
 
@@ -1366,7 +1394,7 @@ internal sealed class AudioEngine : IDisposable
         }
         finally
         {
-            EvaluateCallbackLoad(Stopwatch.GetTimestamp() - callbackStart, frames);
+            EvaluateCallbackLoad(Stopwatch.GetTimestamp() - callbackStart, frames, recordingDiagnostics);
         }
     }
 
@@ -1560,7 +1588,7 @@ internal sealed class AudioEngine : IDisposable
         Interlocked.Exchange(ref _faultCallbackCount, 0);
     }
 
-    private void EvaluateCallbackLoad(long elapsedTicks, int frames)
+    private void EvaluateCallbackLoad(long elapsedTicks, int frames, RecorderDiagnostics? recordingDiagnostics)
     {
         if (frames <= 0)
         {
@@ -1570,6 +1598,7 @@ internal sealed class AudioEngine : IDisposable
         double availableTicks = Stopwatch.Frequency * (frames / (double)SampleRate);
         int loadPercent = (int)Math.Clamp(Math.Round((elapsedTicks / availableTicks) * 100.0), 0, 999);
         Volatile.Write(ref _lastDspLoadPercent, loadPercent);
+        recordingDiagnostics?.ObserveDsp(loadPercent);
 
         UpdateMaximum(ref _maxDspLoadPercent, loadPercent);
         switch (_processor.CurrentChannel)
