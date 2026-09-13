@@ -2521,13 +2521,13 @@ public sealed class MainForm : Form, IMessageFilter
         // 2.41.52: por pedido del usuario, el tipo de piano/órgano queda inmediatamente
         // después de Tonalidad para que el recorrido con JAWS siga un orden musical lógico.
         ConfigureCombo(_pianoSound, "Tipo de piano u órgano",
-            "Seleccione Piano acústico, Rhodes, Piano Worship, Concert Grand u Órgano Hammond Worship. El Hammond incluye drawbars, percusión suave, vibrato chorus leve y Leslie lento o rápido.");
+            "Seleccione Piano acústico cálido, Piano eléctrico Rhodes, Piano Worship suave, Grand Piano / Concert Grand u Órgano Hammond Worship con Leslie lento o rápido.");
         _pianoSound.Items.AddRange(new object[]
         {
-            "Piano acústico",
+            "Piano acústico cálido",
             "Piano eléctrico Rhodes",
-            "Piano Worship Alabanza",
-            "Piano de cola brillante / Concert Grand",
+            "Piano Worship suave",
+            "Grand Piano / Concert Grand",
             "Órgano Hammond Worship - Leslie lento",
             "Órgano Hammond Worship - Leslie rápido"
         });

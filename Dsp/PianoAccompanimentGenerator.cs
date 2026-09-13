@@ -100,6 +100,8 @@ internal sealed class PianoAccompanimentGenerator
     private int _stepIndex;
     private int _barIndex;
     private int _arpIndex;
+    private double _drumPhase, _hornPhase;
+    private float _drumRotor, _hornRotor;
 
     public PianoAccompanimentGenerator(int sampleRate)
     {
@@ -181,6 +183,17 @@ internal sealed class PianoAccompanimentGenerator
         }
         _samplesUntilNextStep -= 1.0;
 
+        // Rotores compartidos: no se reinician con cada nota y sólo cuestan dos senos por muestra.
+        if (_sound is 4 or 5)
+        {
+            _drumPhase += (_sound == 5 ? 5.3 : 0.7) / _sampleRate;
+            _hornPhase += (_sound == 5 ? 6.4 : 0.9) / _sampleRate;
+            if (_drumPhase >= 1.0) _drumPhase -= 1.0;
+            if (_hornPhase >= 1.0) _hornPhase -= 1.0;
+            _drumRotor = FastSine(_drumPhase);
+            _hornRotor = FastSine(_hornPhase);
+        }
+
         float sum = 0f;
         for (int i = 0; i < _voices.Length; i++)
             sum += ProcessVoice(ref _voices[i]);
@@ -195,6 +208,9 @@ internal sealed class PianoAccompanimentGenerator
         _stepIndex = 0;
         _barIndex = 0;
         _arpIndex = 0;
+        _drumPhase = 0.0;
+        _hornPhase = 0.23;
+        _drumRotor = _hornRotor = 0f;
         Array.Clear(_voices, 0, _voices.Length);
     }
 
@@ -493,16 +509,16 @@ internal sealed class PianoAccompanimentGenerator
         {
             voice.Amp1 = 0.50f; // 16'
             voice.Amp2 = 1.00f; // 8'
-            voice.Amp3 = 0.44f; // 5 1/3'
+            voice.Amp3 = 0.0f; // 5 1/3'
             voice.Amp4 = 0.70f; // 4'
             voice.Amp5 = 0.34f; // 2 2/3'
-            voice.Amp6 = 0.26f; // 2'
+            voice.Amp6 = 0.40f; // 2'
             voice.Decay1 = voice.Decay2 = voice.Decay3 = voice.Decay4 = voice.Decay5 = voice.Decay6 = 1f;
         }
-        else if (_sound == 3) // Concert Grand 2.41.52: un poco más de proyección y caja acústica.
+        else if (_sound == 3) // Concert Grand 2.41.66: cuerpo medio-grave y caída acústica.
         {
             voice.Amp1 = 1.0f;
-            voice.Amp4 = 0.83f;
+            voice.Amp4 = 0.90f;
             voice.Amp2 = 0.86f;
             voice.Amp3 = 0.64f;
             voice.Amp5 = 0.41f;
@@ -625,27 +641,22 @@ internal sealed class PianoAccompanimentGenerator
 
             // Preset de drawbars cálido para worship: 808635 aproximadamente, con
             // 3ra armónica/percussion suave sólo al comienzo y key click discreto.
-            float percussion = MathF.Max(0f, 1f - progress * 5.8f);
+            // Percusión de 230 ms, independiente del tempo y de la duración de la nota.
+            float percussion = MathF.Max(0f, 1f - voice.Age / (_sampleRate * 0.230f));
             percussion *= percussion;
-            float rawOrgan = draw16 * voice.Amp1 * 0.42f
-                + draw8 * voice.Amp2 * 0.78f
-                + draw513 * voice.Amp3 * 0.30f
+            float drum = draw16 * voice.Amp1 * 0.42f + draw8 * voice.Amp2 * 0.78f;
+            float horn = draw513 * voice.Amp3 * 0.30f
                 + draw4 * voice.Amp4 * 0.48f
                 + draw223 * voice.Amp5 * (0.24f + 0.17f * percussion)
                 + draw2 * voice.Amp6 * 0.18f;
 
-            int clickSamples = Math.Max(1, (int)(_sampleRate * 0.0022f));
+            // Dos bandas con amplitud y timbre suaves, sin chorus ni saturación de voz.
+            raw = (drum * (0.97f + 0.03f * _drumRotor)
+                + horn * (0.95f + 0.05f * _hornRotor)) * 1.08f;
+            int clickSamples = Math.Max(1, (int)(_sampleRate * 0.0014f));
             if (voice.Age < clickSamples)
-                rawOrgan += NextVoiceNoise(ref voice) * (1f - voice.Age / (float)clickSamples) * 0.045f;
-
-            // Leslie: lento (chorale) o rápido (tremolo). En mono se simula con
-            // modulación suave de amplitud/tono; evita un chorus evidente.
-            float leslieHz = _sound == 5 ? 6.1f : 0.72f;
-            float rotor = FastSine((voice.Age * leslieHz / _sampleRate) % 1.0);
-            float tremoloDepth = _sound == 5 ? 0.20f : 0.075f;
-            float rotorGain = 1f - tremoloDepth + tremoloDepth * (0.5f + 0.5f * rotor);
-            raw = FastDspMath.SoftClip(rawOrgan * 1.30f) * rotorGain;
-            cutoffAlpha = (_sound == 5 ? 0.30f : 0.25f) + 0.055f * rotor;
+                raw += NextVoiceNoise(ref voice) * (1f - voice.Age / (float)clickSamples) * 0.022f;
+            cutoffAlpha = 0.28f + 0.012f * _drumRotor + 0.025f * _hornRotor;
         }
         else if (_sound == 1) // Rhodes: cuerpo redondo, tine eléctrico y tremolo muy suave.
         {
@@ -683,12 +694,12 @@ internal sealed class PianoAccompanimentGenerator
 
             float fourth = FastSine(voice.Phase5);
             float fifth = FastSine(voice.Phase6);
-            raw = fundamental * voice.Amp1 * (0.64f + 0.07f * lowRegister)
-                + detuned * voice.Amp4 * 0.30f
+            raw = fundamental * voice.Amp1 * (0.68f + 0.10f * lowRegister)
+                + detuned * voice.Amp4 * (0.32f + 0.03f * lowRegister)
                 + second * voice.Amp2 * (0.31f + 0.11f * hammer)
-                + upper * voice.Amp3 * (0.22f + 0.16f * hammer)
-                + fourth * voice.Amp5 * (0.16f + 0.11f * hammer)
-                + fifth * voice.Amp6 * (0.11f + 0.085f * hammer);
+                + upper * voice.Amp3 * (0.19f + 0.14f * hammer)
+                + fourth * voice.Amp5 * (0.13f + 0.095f * hammer)
+                + fifth * voice.Amp6 * (0.085f + 0.070f * hammer);
 
             if (hammer > 0f)
             {
@@ -699,9 +710,9 @@ internal sealed class PianoAccompanimentGenerator
             // Un poco más de tabla armónica y apertura para que el Grand se reconozca
             // inmediatamente frente al acústico clásico, sin llegar a un brillo metálico.
             voice.Soundboard += (raw - voice.Soundboard) * (0.015f + 0.007f * lowRegister);
-            raw = raw * 0.855f + voice.Soundboard * 0.145f;
+            raw = raw * 0.82f + voice.Soundboard * 0.18f;
             raw = FastDspMath.SoftClip(raw * (1.14f + 0.14f * voice.Velocity));
-            cutoffAlpha = 0.59f + register * 0.22f;
+            cutoffAlpha = 0.55f + register * 0.20f;
 
             voice.Amp1 *= voice.Decay1;
             voice.Amp4 *= voice.Decay4;
@@ -761,7 +772,7 @@ internal sealed class PianoAccompanimentGenerator
             0 => 0.58f,
             1 => 0.50f,
             2 => 0.56f,
-            3 => 0.60f,
+            3 => 0.61f,
             4 or 5 => 0.54f,
             _ => 0.58f
         };
