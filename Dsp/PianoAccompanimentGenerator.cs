@@ -256,6 +256,7 @@ internal sealed class PianoAccompanimentGenerator
 
     public void Reset()
     {
+        HarmonyRevision++;
         _samplesUntilNextStep = 0.0;
         _stepIndex = 0;
         _barIndex = 0;
@@ -290,18 +291,30 @@ internal sealed class PianoAccompanimentGenerator
         }
     }
 
-    private void TriggerStep(int step)
+    // Read-only harmony access for bass; rendering and piano clock remain unchanged.
+    internal int HarmonyRevision { get; private set; }
+
+    internal void GetBassClock(out bool enabled, out int stepsPerBar, out double samplesPerStep,
+        out int step, out int bar, out double samplesUntilNextStep)
     {
-        int rootOffset;
-        int quality; // 0 mayor, 1 menor, 2 disminuido.
-        int seventh = 0; // 0 sin séptima; 1 menor; 2 mayor; 3 disminuida.
+        enabled = _enabled;
+        stepsPerBar = _stepsPerBar;
+        samplesPerStep = _samplesPerStep;
+        step = _stepIndex;
+        bar = _barIndex;
+        samplesUntilNextStep = _samplesUntilNextStep;
+    }
+
+    internal void GetChordForBar(int barIndex, out int rootOffset, out int quality, out int seventh)
+    {
+        seventh = 0; // 0 sin séptima; 1 menor; 2 mayor; 3 disminuida.
         if (_progression == 5 && _customCount > 0)
         {
-            GetCustomChordForBar(_barIndex, out rootOffset, out quality, out seventh);
+            GetCustomChordForBar(barIndex, out rootOffset, out quality, out seventh);
         }
         else
         {
-            int chordIndex = _barIndex & 3;
+            int chordIndex = barIndex & 3;
             bool tonicMinor = _key >= 12;
             int safeProgression = Math.Clamp(_progression, 0, 4);
             rootOffset = tonicMinor
@@ -312,6 +325,11 @@ internal sealed class PianoAccompanimentGenerator
                 : MinorQuality[safeProgression, chordIndex];
             quality = minor ? 1 : 0;
         }
+    }
+
+    private void TriggerStep(int step)
+    {
+        GetChordForBar(_barIndex, out int rootOffset, out int quality, out int seventh);
 
         // 2.41.56: los estilos de piano ahora pueden acompañar los mismos géneros
         // que la batería. Los índices 0 a 3 se conservan para no alterar escenas viejas.

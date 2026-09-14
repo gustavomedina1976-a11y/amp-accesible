@@ -454,7 +454,7 @@ internal sealed class AudioEngine : IDisposable
         float pianoLeft = 0f, pianoRight = 0f;
         if (bandActive)
         {
-            center += _dualDrums.Process() + _dualBackingBass.Process();
+            center += _dualDrums.Process() + _dualBackingBass.Process(_dualPiano);
             _dualPiano.ProcessStereo(out pianoLeft, out pianoRight);
         }
         left = center + pianoLeft;

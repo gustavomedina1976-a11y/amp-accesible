@@ -1,3 +1,14 @@
+Amp Accessible 2.41.70 - Bajo Armonico Natural JAWS
+Base estable: 2.41.69 (ebc06bf).
+- Cambio exclusivo del timbre del bajo de acompanamiento: parciales en relaciones 2:1, 3:1 y 4:1, sin batimientos por desafinacion entre armonicos.
+- Caida de armonicos, brillo y pulsacion medida en segundos para mantener una articulacion consistente al cambiar BPM. Conserva el timbre ajustado y los controles accesibles. La tonalidad global compartida de 2.41.69 no se modifica.
+- El bajo sigue raiz y calidad del acorde de la progresion del piano, incluidas progresiones personalizadas, alteraciones y duraciones por acorde. Quinta disminuida cuando corresponde y septima indicada en la linea melodica. Usa la posicion del piano activo; con piano apagado recorre la misma progresion independientemente. Integrado en ruta normal y Dos Guitarras.
+- Sin cambios de sonido en bateria, ride, redobles, piano, Grand Piano, Rhodes, Hammond o Leslie. NAM, IR, amplificadores, efectos, grabadora, looper y afinador conservados.
+- Version y BuildName actualizados; version del instalador sincronizada.
+Validacion: Release compila con 0 errores y las 7 advertencias existentes en la base. Prueba aislada: 1920 combinaciones de frecuencia de muestreo, BPM, patron, linea, tonalidad y modo mayor/menor; salida finita y limitada, silencio al desactivar y ataque tras reset. Sin asignaciones en el bucle medido.
+Validacion del seguimiento: 720 casos con cinco lineas, seis ritmos, progresiones predefinidas/personalizadas y piano encendido/apagado. Piano comparado muestra a muestra contra 2.41.69 en 324 configuraciones: ambos canales identicos. Sin asignaciones en procesamiento conjunto medido; reinicio sincronizado.
+Pendiente: escucha comparativa en interfaz de audio y comprobacion con JAWS; las pruebas numericas no confirman la calidad perceptual.
+
 Amp Accessible 2.41.69 - Tonalidad Compartida Acompanamiento JAWS
 Base estable: 2.41.68 (33764f0).
 - Preparacion de la nueva version: numero de version y BuildName actualizados en la aplicacion y version sincronizada en el proyecto y el instalador.

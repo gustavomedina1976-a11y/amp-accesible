@@ -544,7 +544,7 @@ internal sealed class AudioProcessor : IDisposable
         if (play)
         {
             drums = _drums.Process();
-            bass = _backingBass.Process();
+            bass = _backingBass.Process(_piano);
             _piano.ProcessStereo(out pianoLeft, out pianoRight);
         }
         else

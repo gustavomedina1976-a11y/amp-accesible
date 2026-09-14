@@ -28,6 +28,11 @@ internal sealed class BassAccompanimentGenerator
     private int _barIndex;
     private int _noteEventIndex;
 
+    private int _harmonyRevision = -1;
+    private int _chordRootOffset;
+    private int _chordQuality;
+    private int _chordSeventh;
+
     private int _noteRemaining;
     private int _noteAge;
     private int _noteTotal;
@@ -84,12 +89,36 @@ internal sealed class BassAccompanimentGenerator
         if (enabledChanged || timingChanged || musicalChanged) Reset();
     }
 
-    public float Process()
+    public float Process(PianoAccompanimentGenerator? harmony = null)
     {
         if (!_enabled) return 0f;
 
+        if (harmony != null)
+        {
+            if (_harmonyRevision != harmony.HarmonyRevision)
+            {
+                Reset();
+                _harmonyRevision = harmony.HarmonyRevision;
+            }
+            harmony.GetBassClock(out bool pianoEnabled, out _stepsPerBar, out _samplesPerStep,
+                out int step, out int bar, out double untilNextStep);
+            if (pianoEnabled)
+            {
+                _stepIndex = step;
+                _barIndex = bar;
+                _samplesUntilNextStep = untilNextStep;
+            }
+        }
         if (_samplesUntilNextStep <= 0.0)
         {
+            if (harmony != null)
+                harmony.GetChordForBar(_barIndex, out _chordRootOffset, out _chordQuality, out _chordSeventh);
+            else
+            {
+                _chordRootOffset = 0;
+                _chordQuality = _minor ? 1 : 0;
+                _chordSeventh = 0;
+            }
             TriggerStep(_stepIndex);
             _stepIndex++;
             if (_stepIndex >= Math.Max(1, _stepsPerBar))
@@ -252,7 +281,7 @@ internal sealed class BassAccompanimentGenerator
         else if (pop)
         {
             // Pops de octava/quinta alta; alternan para evitar monotonía.
-            semitoneOffset = (eventIndex & 1) == 0 ? 12 : 19;
+            semitoneOffset = (eventIndex & 1) == 0 ? 12 : 12 + (_chordQuality == 2 ? 6 : 7);
         }
         else
         {
@@ -260,9 +289,9 @@ internal sealed class BassAccompanimentGenerator
             semitoneOffset = (eventIndex % 4) switch
             {
                 0 => 0,
-                1 => 7,
+                1 => _chordQuality == 2 ? 6 : 7,
                 2 => 0,
-                _ => _minor ? 3 : 4
+                _ => _chordQuality == 0 ? 4 : 3
             };
         }
 
@@ -276,7 +305,7 @@ internal sealed class BassAccompanimentGenerator
         return _lineMode switch
         {
             0 => 0, // Raíz
-            1 => (eventIndex & 1) == 0 ? 0 : 7, // Raíz - quinta
+            1 => (eventIndex & 1) == 0 ? 0 : (_chordQuality == 2 ? 6 : 7), // Raíz - quinta
             2 => (eventIndex & 1) == 0 ? 0 : 12, // Octavas
             _ => SelectMelodicOffset(eventIndex)
         };
@@ -285,13 +314,18 @@ internal sealed class BassAccompanimentGenerator
     private int SelectMelodicOffset(int eventIndex)
     {
         // Frase corta y consonante. El tercer grado cambia entre mayor y menor.
-        int[] sequence = _minor ? MinorLine : MajorLine;
-        return sequence[eventIndex % sequence.Length];
+        int[] sequence = _chordQuality == 0 ? MajorLine : MinorLine;
+        int interval = sequence[eventIndex % sequence.Length];
+        if (_chordQuality == 2)
+            return (eventIndex % 4) switch { 0 => 0, 1 => 6, 2 => 3, _ => 12 };
+        if (eventIndex % sequence.Length == 7 && _chordSeventh != 0)
+            return _chordSeventh switch { 1 => 10, 2 => 11, _ => 9 };
+        return interval;
     }
 
     private void StartNote(int semitoneOffset, float durationSteps, float velocity)
     {
-        int rootMidi = 36 + _key; // C2 como referencia.
+        int rootMidi = 36 + ((_key + _chordRootOffset + 12) % 12); // C2 como referencia.
         if (rootMidi > 40) rootMidi -= 12; // F a B bajan una octava para conservar registro de bajo.
         int midi = Math.Clamp(rootMidi + semitoneOffset, 24, 55);
         _frequency = 440f * MathF.Pow(2f, (midi - 69) / 12f);
@@ -354,9 +388,9 @@ internal sealed class BassAccompanimentGenerator
             : 0.0012f);
         double increment = (_frequency * _noteDetuneRatio * bendRatio) / _sampleRate;
         _phase1 += increment;
-        _phase2 += increment * 2.003;
-        _phase3 += increment * 3.011;
-        _phase4 += increment * 4.026;
+        _phase2 += increment * 2.0;
+        _phase3 += increment * 3.0;
+        _phase4 += increment * 4.0;
         if (_phase1 >= 1.0) _phase1 -= Math.Floor(_phase1);
         if (_phase2 >= 1.0) _phase2 -= Math.Floor(_phase2);
         if (_phase3 >= 1.0) _phase3 -= Math.Floor(_phase3);
@@ -367,12 +401,14 @@ internal sealed class BassAccompanimentGenerator
         float s3 = FastSine(_phase3);
         float s4 = FastSine(_phase4);
 
-        // En una cuerda real los parciales altos mueren antes que la fundamental.
-        // Esta evolución espectral es la corrección principal al carácter sintético.
-        float h2Life = 0.24f + (0.76f * remaining);
-        float h3Life = 0.10f + (0.90f * remaining * remaining);
-        float h4Life = remaining * remaining * (0.35f + (0.65f * remaining));
-        float pluck = MathF.Max(0f, 1f - progress * (_lineMode == 4 ? 18f : 8f));
+        // 2.41.70: parciales armonicos y decaimiento en segundos. El color de
+        // la pulsacion no se estira al bajar el BPM; la fundamental conserva cuerpo.
+        float ageSeconds = _noteAge / (float)_sampleRate;
+        float harmonicLife = 1f / (1f + ageSeconds * 5f);
+        float h2Life = 0.24f + 0.76f * harmonicLife;
+        float h3Life = 0.10f + 0.90f * harmonicLife * harmonicLife;
+        float h4Life = harmonicLife * harmonicLife * harmonicLife;
+        float pluck = MathF.Max(0f, 1f - ageSeconds / (_lineMode == 4 ? 0.018f : 0.035f));
         pluck *= pluck;
 
         float raw;
@@ -441,7 +477,7 @@ internal sealed class BassAccompanimentGenerator
         raw = FastDspMath.SoftClip(raw * drive);
 
         // Filtro dinámico: brillante al ataque y progresivamente más oscuro.
-        float spectralLife = 0.34f + (0.66f * remaining);
+        float spectralLife = 0.34f + (0.66f * harmonicLife);
         float activeFilterAlpha = _lineMode == 4
             ? Math.Clamp(_filterAlpha * (2.25f + (1.25f * spectralLife)) * _noteBrightness, 0.05f, 0.58f)
             : Math.Clamp(_filterAlpha * (0.52f + (0.82f * spectralLife)) * _noteBrightness, 0.025f, 0.30f);
