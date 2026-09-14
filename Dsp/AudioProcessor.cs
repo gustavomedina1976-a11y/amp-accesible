@@ -336,13 +336,14 @@ internal sealed class AudioProcessor : IDisposable
                 float dryGuitar = baseDryGuitar * monitorGuitarDuck;
                 float tunerTone = _tunerTone.Process();
                 float tunerMetronome = _metronome.Process();
-                ProcessFollowedAccompaniment(dryInput, parameters, out float tunerDrums, out float tunerBass, out float tunerPiano);
+                ProcessFollowedAccompaniment(dryInput, parameters, out float tunerDrums, out float tunerBass, out float tunerPianoLeft, out float tunerPianoRight);
                 float tunerMonitorVoice = voice * voiceMonitorGain;
-                float mixed = FinalOutputLimiter(dryGuitar + tunerTone + tunerMetronome + tunerDrums + tunerBass + tunerPiano + tunerMonitorVoice);
+                float mixed = FinalOutputLimiter(dryGuitar + tunerTone + tunerMetronome + tunerDrums + tunerBass + tunerPianoLeft + tunerMonitorVoice);
+                float mixedRight = FinalOutputLimiter(dryGuitar + tunerTone + tunerMetronome + tunerDrums + tunerBass + tunerPianoRight + tunerMonitorVoice);
                 int tunerOutputIndex = frame * 2;
                 WriteLoopCapture(loopCaptureOutput, tunerOutputIndex, baseDryGuitar, baseDryGuitar);
                 output[tunerOutputIndex] = mixed;
-                output[tunerOutputIndex + 1] = mixed;
+                output[tunerOutputIndex + 1] = mixedRight;
                 if (meetOutput is not null)
                 {
                     float meet = FinalOutputLimiter(
@@ -388,10 +389,10 @@ internal sealed class AudioProcessor : IDisposable
             float meetGuitarRight = right * meetGuitarDuck;
             float tunerToneNormal = _tunerTone.Process();
             float metronome = _metronome.Process();
-            ProcessFollowedAccompaniment(dryInput, parameters, out float drums, out float backingBass, out float piano);
+            ProcessFollowedAccompaniment(dryInput, parameters, out float drums, out float backingBass, out float pianoLeft, out float pianoRight);
             float monitorVoice = voice * voiceMonitorGain;
-            left = FinalOutputLimiter(guitarLeft + tunerToneNormal + metronome + drums + backingBass + piano + monitorVoice);
-            right = FinalOutputLimiter(guitarRight + tunerToneNormal + metronome + drums + backingBass + piano + monitorVoice);
+            left = FinalOutputLimiter(guitarLeft + tunerToneNormal + metronome + drums + backingBass + pianoLeft + monitorVoice);
+            right = FinalOutputLimiter(guitarRight + tunerToneNormal + metronome + drums + backingBass + pianoRight + monitorVoice);
 
             output[outputIndex] = left;
             output[outputIndex + 1] = right;
@@ -519,11 +520,11 @@ internal sealed class AudioProcessor : IDisposable
             float meetGuitarRight = right * meetGuitarDuck;
             float tunerTone = _tunerTone.Process();
             float metronome = _metronome.Process();
-            ProcessFollowedAccompaniment(dryInput, parameters, out float drums, out float backingBass, out float piano);
+            ProcessFollowedAccompaniment(dryInput, parameters, out float drums, out float backingBass, out float pianoLeft, out float pianoRight);
             float voice = _namVoice[frame];
             float monitorVoice = voice * voiceMonitorGain;
-            left = FinalOutputLimiter(guitarLeft + tunerTone + metronome + drums + backingBass + piano + monitorVoice);
-            right = FinalOutputLimiter(guitarRight + tunerTone + metronome + drums + backingBass + piano + monitorVoice);
+            left = FinalOutputLimiter(guitarLeft + tunerTone + metronome + drums + backingBass + pianoLeft + monitorVoice);
+            right = FinalOutputLimiter(guitarRight + tunerTone + metronome + drums + backingBass + pianoRight + monitorVoice);
 
             output[outputIndex] = left;
             output[outputIndex + 1] = right;
@@ -537,20 +538,20 @@ internal sealed class AudioProcessor : IDisposable
 
 
     private void ProcessFollowedAccompaniment(float guitarSample, DspParameters parameters,
-        out float drums, out float bass, out float piano)
+        out float drums, out float bass, out float pianoLeft, out float pianoRight)
     {
         bool play = ShouldPlayFollowedAccompaniment(guitarSample, parameters.AccompanimentFollowGuitar);
         if (play)
         {
             drums = _drums.Process();
             bass = _backingBass.Process();
-            piano = _piano.Process();
+            _piano.ProcessStereo(out pianoLeft, out pianoRight);
         }
         else
         {
             drums = 0f;
             bass = 0f;
-            piano = 0f;
+            pianoLeft = pianoRight = 0f;
         }
     }
 

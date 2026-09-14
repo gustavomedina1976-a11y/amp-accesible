@@ -102,10 +102,18 @@ internal sealed class PianoAccompanimentGenerator
     private int _arpIndex;
     private double _drumPhase, _hornPhase;
     private float _drumRotor, _hornRotor;
+    private readonly float[] _leslieLow;
+    private readonly float[] _leslieHigh;
+    private int _leslieWrite;
+    private float _leslieCrossover;
+    private readonly float _leslieAlpha;
 
     public PianoAccompanimentGenerator(int sampleRate)
     {
         _sampleRate = Math.Max(8000, sampleRate);
+        _leslieLow = new float[(int)(_sampleRate * 0.012) + 4];
+        _leslieHigh = new float[_leslieLow.Length];
+        _leslieAlpha = 1f - MathF.Exp(-2f * MathF.PI * 800f / _sampleRate);
         RecalculateTiming();
         Reset();
     }
@@ -167,7 +175,14 @@ internal sealed class PianoAccompanimentGenerator
 
     public float Process()
     {
-        if (!_enabled) return 0f;
+        ProcessStereo(out float left, out float right);
+        return (left + right) * 0.5f;
+    }
+
+    public void ProcessStereo(out float left, out float right)
+    {
+        left = right = 0f;
+        if (!_enabled) return;
 
         if (_samplesUntilNextStep <= 0.0)
         {
@@ -199,7 +214,44 @@ internal sealed class PianoAccompanimentGenerator
             sum += ProcessVoice(ref _voices[i]);
 
         // Techo prudente: el piano comparte bus con batería y bajo.
-        return Math.Clamp(FastDspMath.SoftClip(sum * 0.76f) * _volume, -0.78f, 0.78f);
+        if (_sound is 4 or 5)
+        {
+            // Separate bass rotor and horn; opposing microphone positions provide
+            // amplitude motion and fractional propagation delays (Doppler).
+            _leslieCrossover += _leslieAlpha * (sum - _leslieCrossover);
+            _leslieLow[_leslieWrite] = _leslieCrossover;
+            _leslieHigh[_leslieWrite] = sum - _leslieCrossover;
+            float drumNorm = 1f / MathF.Sqrt(1f + 0.04f * _drumRotor * _drumRotor);
+            float hornNorm = 1f / MathF.Sqrt(1f + 0.16f * _hornRotor * _hornRotor);
+            left = ReadRotor(_leslieLow, 0.0030f, 0.00006f, _drumRotor) * (1f + 0.20f * _drumRotor) * drumNorm
+                + ReadRotor(_leslieHigh, 0.0030f, 0.00009f, _hornRotor) * (1f + 0.40f * _hornRotor) * hornNorm;
+            right = ReadRotor(_leslieLow, 0.0030f, 0.00006f, -_drumRotor) * (1f - 0.20f * _drumRotor) * drumNorm
+                + ReadRotor(_leslieHigh, 0.0030f, 0.00009f, -_hornRotor) * (1f - 0.40f * _hornRotor) * hornNorm;
+            float crossLeft = left * 0.82f + right * 0.18f;
+            right = right * 0.82f + left * 0.18f;
+            left = crossLeft;
+            _leslieWrite = (_leslieWrite + 1) % _leslieLow.Length;
+        }
+        else left = right = sum;
+        if (_sound == 3)
+        {
+            // Soft knee reserves the original Grand peak headroom while lifting its body.
+            float magnitude = MathF.Abs(left);
+            if (magnitude > 1.10f)
+                left = MathF.CopySign(1.10f + (magnitude - 1.10f) / (1f + (magnitude - 1.10f) / 0.32f), left);
+            right = left;
+        }
+        left = Math.Clamp(FastDspMath.SoftClip(left * 0.76f) * _volume, -0.78f, 0.78f);
+        right = Math.Clamp(FastDspMath.SoftClip(right * 0.76f) * _volume, -0.78f, 0.78f);
+    }
+
+    private float ReadRotor(float[] buffer, float distance, float depth, float rotor)
+    {
+        float position = _leslieWrite - (distance + depth * rotor) * _sampleRate;
+        if (position < 0f) position += buffer.Length;
+        int index = (int)position;
+        float fraction = position - index;
+        return buffer[index] + (buffer[(index + 1) % buffer.Length] - buffer[index]) * fraction;
     }
 
     public void Reset()
@@ -211,6 +263,10 @@ internal sealed class PianoAccompanimentGenerator
         _drumPhase = 0.0;
         _hornPhase = 0.23;
         _drumRotor = _hornRotor = 0f;
+        _leslieCrossover = 0f;
+        _leslieWrite = 0;
+        Array.Clear(_leslieLow);
+        Array.Clear(_leslieHigh);
         Array.Clear(_voices, 0, _voices.Length);
     }
 
@@ -523,8 +579,8 @@ internal sealed class PianoAccompanimentGenerator
             voice.Amp3 = 0.64f;
             voice.Amp5 = 0.41f;
             voice.Amp6 = 0.28f;
-            voice.Decay1 = PerSampleDecay(4.65f - 1.55f * register);
-            voice.Decay4 = PerSampleDecay(4.05f - 1.18f * register);
+            voice.Decay1 = PerSampleDecay(4.95f - 1.55f * register);
+            voice.Decay4 = PerSampleDecay(4.35f - 1.18f * register);
             voice.Decay2 = PerSampleDecay(2.18f - 0.45f * register);
             voice.Decay3 = PerSampleDecay(1.22f - 0.22f * register);
             voice.Decay5 = PerSampleDecay(0.76f - 0.10f * register);
@@ -629,6 +685,9 @@ internal sealed class PianoAccompanimentGenerator
         float detuned = FastSine(voice.Phase4);
         float raw;
         float cutoffAlpha;
+        // Body reinforcement starts after 30 ms, leaving the hammer transient intact.
+        float bodyRise = Math.Clamp((voice.Age - _sampleRate * 0.030f) / (_sampleRate * 0.090f), 0f, 1f);
+        bodyRise = bodyRise * bodyRise * (3f - 2f * bodyRise);
 
         if (_sound is 4 or 5) // Órgano Hammond Worship con Leslie lento/rápido.
         {
@@ -651,12 +710,11 @@ internal sealed class PianoAccompanimentGenerator
                 + draw2 * voice.Amp6 * 0.18f;
 
             // Dos bandas con amplitud y timbre suaves, sin chorus ni saturación de voz.
-            raw = (drum * (0.97f + 0.03f * _drumRotor)
-                + horn * (0.95f + 0.05f * _hornRotor)) * 1.08f;
+            raw = (drum * 0.97f + horn * 0.95f) * 1.08f;
             int clickSamples = Math.Max(1, (int)(_sampleRate * 0.0014f));
             if (voice.Age < clickSamples)
                 raw += NextVoiceNoise(ref voice) * (1f - voice.Age / (float)clickSamples) * 0.022f;
-            cutoffAlpha = 0.28f + 0.012f * _drumRotor + 0.025f * _hornRotor;
+            cutoffAlpha = 0.28f;
         }
         else if (_sound == 1) // Rhodes: cuerpo redondo, tine eléctrico y tremolo muy suave.
         {
@@ -676,7 +734,7 @@ internal sealed class PianoAccompanimentGenerator
             // queda un cuerpo ancho formado por dos cuerdas casi al unísono.
             float hammer = MathF.Max(0f, 1f - progress * 18.0f);
             hammer *= hammer;
-            float body = fundamental * 0.50f + detuned * 0.30f;
+            float body = (fundamental * 0.50f + detuned * 0.30f) * (1f + 0.29f * bodyRise);
             raw = body
                 + second * (0.115f + 0.065f * hammer)
                 + upper * (0.045f + 0.10f * hammer);
@@ -694,23 +752,23 @@ internal sealed class PianoAccompanimentGenerator
 
             float fourth = FastSine(voice.Phase5);
             float fifth = FastSine(voice.Phase6);
-            raw = fundamental * voice.Amp1 * (0.68f + 0.10f * lowRegister)
-                + detuned * voice.Amp4 * (0.32f + 0.03f * lowRegister)
+            raw = fundamental * voice.Amp1 * (0.68f + 0.10f * lowRegister) * (1f + 0.48f * bodyRise)
+                + detuned * voice.Amp4 * (0.32f + 0.03f * lowRegister) * (1f + 0.48f * bodyRise)
                 + second * voice.Amp2 * (0.31f + 0.11f * hammer)
                 + upper * voice.Amp3 * (0.19f + 0.14f * hammer)
-                + fourth * voice.Amp5 * (0.13f + 0.095f * hammer)
-                + fifth * voice.Amp6 * (0.085f + 0.070f * hammer);
+                + fourth * voice.Amp5 * (0.12f + 0.090f * hammer)
+                + fifth * voice.Amp6 * (0.075f + 0.065f * hammer);
 
             if (hammer > 0f)
             {
                 float felt = NextVoiceNoise(ref voice);
-                raw += felt * hammer * (0.125f + 0.085f * register) * (0.64f + 0.36f * voice.Velocity);
+                raw += felt * hammer * (0.110f + 0.075f * register) * (0.64f + 0.36f * voice.Velocity);
             }
 
             // Un poco más de tabla armónica y apertura para que el Grand se reconozca
             // inmediatamente frente al acústico clásico, sin llegar a un brillo metálico.
             voice.Soundboard += (raw - voice.Soundboard) * (0.015f + 0.007f * lowRegister);
-            raw = raw * 0.82f + voice.Soundboard * 0.18f;
+            raw = raw * 0.82f + voice.Soundboard * (0.18f + 0.05f * bodyRise);
             raw = FastDspMath.SoftClip(raw * (1.14f + 0.14f * voice.Velocity));
             cutoffAlpha = 0.55f + register * 0.20f;
 

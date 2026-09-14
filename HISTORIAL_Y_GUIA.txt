@@ -1,3 +1,13 @@
+Amp Accessible 2.41.68 - Piano Leslie Estereo y Ride Natural JAWS
+Base estable: 2.41.67 (dc53154).
+- Bajo y piano comparten las mismas 24 tonalidades mayores/menores. Sol mayor sigue en índice 7. El bajo conserva key 0..11 y minor booleano en preferencias, bancos y escenas, incluidas las completas de Dos Guitarras.
+- Piano Worship: aproximadamente +2 dB de cuerpo sostenido, con aumento progresivo desde 30 ms. Grand Piano: aproximadamente +2,2 dB sostenidos, martillo más suave, tabla armónica reforzada, cuerdas más largas y pico controlado. Acústico y Rhodes conservados.
+- Hammond lento/rápido: Leslie estéreo de dos bandas, con amplitud y retardos fraccionales variables por canal. Salida estéreo en todas las rutas normales y de Dos Guitarras; batería, bajo y metrónomo centrados.
+- Ride: baqueta corta y filtrada, tres resonancias inarmónicas variables y wash persistente de energía limitada que no se corta con cada golpe. Se conserva el volumen general, los patrones y el microtiming de batería; al agotarse la energía deja de procesarse.
+- Se conserva íntegro Audio/PracticeRecorder.cs y toda la telemetría de grabación de 2.41.67. Sin cambios en modelos persistentes, NAM, IR, amplificadores, efectos de guitarra, afinador, looper ni lógica de seguimiento F12.
+Validación: compilación Release sin errores; 24 conversiones ida/vuelta; piano/Leslie y ride a 8000, 44100, 48000 y 96000 Hz; señal finita, techo de salida, silencio al desactivar/resetear, separación estéreo, cola y solapamiento de ride; sin asignaciones de memoria en el procesamiento probado.
+Pendiente de validación perceptual: escucha en interfaz de audio y navegación con JAWS. Las pruebas numéricas no sustituyen estas comprobaciones.
+
 Amp Accessible 2.41.58 - Actualizaciones GitHub Automáticas JAWS
 NOVEDAD 2.41.58: se incorpora el flujo de publicación automática mediante GitHub Actions y GitHub Releases. Al publicar una versión nueva, GitHub puede compilar Windows x64 autocontenido, generar el instalador, crear paquetes incrementales .gdmupdate y publicar update-channel.json con verificación SHA-256.
 NOVEDAD 2.41.58: las compilaciones generadas por GitHub reciben automáticamente el canal HTTPS del repositorio. El botón Buscar actualizaciones puede usar ese canal sin editar manualmente la publicación.

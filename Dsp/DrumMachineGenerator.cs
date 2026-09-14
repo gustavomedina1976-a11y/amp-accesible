@@ -83,21 +83,16 @@ internal sealed class DrumMachineGenerator
     private float _crashVelocity;
     private float _crashPitchScale = 1f;
 
-    // Ride dedicado, afinado desde 2.41.56: menos ping aislado,
-    // más cuerpo de bronce y una baqueta redondeada.
-    private int _rideRemaining;
-    private int _rideAge;
-    private int _rideTotal;
-    private float _ridePreviousNoise;
-    private float _rideFastNoise;
-    private float _rideSlowNoise;
-    private float _rideBodyNoise;
-    private double _ridePhaseA;
-    private double _ridePhaseB;
-    private double _ridePhaseC;
-    private float _rideVelocity;
-    private float _ridePitchScale = 1f;
-    private float _rideBrightness = 1f;
+    // Ride: a short stick/bronze transient excites a continuous, bounded wash.
+    private int _rideRemaining, _rideAge, _rideTotal;
+    private float _rideFastNoise, _rideSlowNoise, _rideBodyNoise;
+    private double _ridePhaseA, _ridePhaseB, _ridePhaseC;
+    private double _rideIncrementA, _rideIncrementB, _rideIncrementC;
+    private float _rideVelocity, _rideBrightness, _rideWashEnergy, _rideWashLevel;
+    private float _rideModeA, _rideModeB, _rideModeC;
+    private readonly float _rideFastAlpha, _rideSlowAlpha, _rideBodyAlpha;
+    private readonly float _rideWashDecay, _rideWashSlew, _rideDecayA, _rideDecayB, _rideDecayC;
+    private uint _rideNoiseState = 0x71A9B35Du;
 
     // Voz de tom para fills cortos. Un único tom cambia de afinación en cada golpe,
     // como un baterista recorriendo tom alto, medio y piso sin sumar voces artificiales.
@@ -126,6 +121,14 @@ internal sealed class DrumMachineGenerator
     public DrumMachineGenerator(int sampleRate)
     {
         _sampleRate = Math.Max(8000, sampleRate);
+        _rideFastAlpha = 0.40f;
+        _rideSlowAlpha = 0.073f;
+        _rideBodyAlpha = 0.020f;
+        _rideWashDecay = MathF.Exp(-2f / (0.30f * _sampleRate));
+        _rideWashSlew = 1f - MathF.Exp(-500f / _sampleRate);
+        _rideDecayA = MathF.Exp(-28f / _sampleRate);
+        _rideDecayB = MathF.Exp(-37f / _sampleRate);
+        _rideDecayC = MathF.Exp(-49f / _sampleRate);
         _roomBuffer = new float[Math.Max(256, (int)(_sampleRate * 0.042f))];
         _roomTapA = Math.Max(1, (int)(_sampleRate * 0.0097f));
         _roomTapB = Math.Max(1, (int)(_sampleRate * 0.0183f));
@@ -191,9 +194,12 @@ internal sealed class DrumMachineGenerator
         _crashPhaseA = _crashPhaseB = _crashPhaseC = 0.0;
         _ridePhaseA = _ridePhaseB = _ridePhaseC = 0.0;
         _tomPhaseA = _tomPhaseB = 0.0;
-        _hatPreviousNoise = _snarePreviousNoise = _crashPreviousNoise = _ridePreviousNoise = _tomPreviousNoise = 0f;
+        _hatPreviousNoise = _snarePreviousNoise = _crashPreviousNoise = _tomPreviousNoise = 0f;
         _crashFastNoise = _crashSlowNoise = _crashBodyNoise = 0f;
         _rideFastNoise = _rideSlowNoise = _rideBodyNoise = 0f;
+        _rideWashEnergy = _rideWashLevel = 0f;
+        _rideModeA = _rideModeB = _rideModeC = 0f;
+        _rideNoiseState = 0x71A9B35Du;
         _snareGhost = false;
         _roomIndex = 0;
         _roomDamped = 0f;
@@ -478,21 +484,21 @@ internal sealed class DrumMachineGenerator
 
     private void StartRide(float velocity, int delaySamples = 0)
     {
-        // Ride dark/warm: baqueta integrada al cuerpo y wash de bronce dominante.
-        float duration = 0.56f + NextNoise() * 0.075f;
-        _rideTotal = Math.Max(1, (int)(_sampleRate * Math.Clamp(duration, 0.44f, 0.68f)));
+        _rideTotal = Math.Max(1, (int)(_sampleRate * 0.13f));
         _rideRemaining = _rideTotal;
         _rideAge = -Math.Max(0, delaySamples);
-        _ridePreviousNoise = NextNoise() * 0.020f;
-        _rideFastNoise = NextNoise() * 0.020f;
-        _rideSlowNoise = _rideFastNoise;
-        _rideBodyNoise = _rideSlowNoise;
-        _ridePhaseA = (NextNoise() + 1.0) * 0.21;
-        _ridePhaseB = (NextNoise() + 1.0) * 0.17;
-        _ridePhaseC = (NextNoise() + 1.0) * 0.11;
         _rideVelocity = Math.Clamp(velocity, 0.20f, 0.72f);
-        _ridePitchScale = 1f + NextNoise() * 0.008f;
-        _rideBrightness = Math.Clamp(0.66f + NextNoise() * 0.070f, 0.56f, 0.76f);
+        _rideBrightness = 0.66f + RideNoise() * 0.055f;
+        _rideIncrementA = 2.0 * Math.PI * (743.0 + 19.0 * RideNoise()) / _sampleRate;
+        _rideIncrementB = 2.0 * Math.PI * (1279.0 + 31.0 * RideNoise()) / _sampleRate;
+        _rideIncrementC = 2.0 * Math.PI * (2137.0 + 47.0 * RideNoise()) / _sampleRate;
+        _ridePhaseA = RideNoise() * Math.PI;
+        _ridePhaseB = RideNoise() * Math.PI;
+        _ridePhaseC = RideNoise() * Math.PI;
+        _rideModeA = 0.021f;
+        _rideModeB = 0.013f;
+        _rideModeC = 0.008f;
+        // Neither the noise followers nor the existing wash are reset here.
     }
 
     private void StartTom(int kind, float velocity, int delaySamples = 0)
@@ -614,43 +620,61 @@ internal sealed class DrumMachineGenerator
             * 0.300f * _crashVelocity;
     }
 
+    private float RideNoise()
+    {
+        uint x = _rideNoiseState;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        _rideNoiseState = x;
+        return (x & 0x00FFFFFFu) / 8388607.5f - 1f;
+    }
+
     private float ProcessRide()
     {
-        if (_rideRemaining <= 0) return 0f;
-        if (_rideAge < 0) { _rideAge++; return 0f; }
+        if (_rideRemaining <= 0 && _rideWashEnergy == 0f && _rideWashLevel == 0f) return 0f;
+        bool transient = _rideRemaining > 0 && _rideAge >= 0;
+        if (_rideRemaining > 0 && _rideAge < 0) _rideAge++;
+        if (transient && _rideAge == 0)
+            _rideWashEnergy = MathF.Min(0.65f, _rideWashEnergy + _rideVelocity * _rideVelocity * 0.65f);
 
-        float progress = Math.Clamp(_rideAge / (float)Math.Max(1, _rideTotal), 0f, 1f);
-        float bodyEnvelope = MathF.Exp(-7.0f * progress);
-        float washEnvelope = MathF.Exp(-2.95f * progress);
+        float noise = RideNoise();
+        _rideFastNoise += (noise - _rideFastNoise) * _rideFastAlpha;
+        _rideSlowNoise += (_rideFastNoise - _rideSlowNoise) * _rideSlowAlpha;
+        _rideBodyNoise += (_rideSlowNoise - _rideBodyNoise) * _rideBodyAlpha;
+        _rideWashLevel += (MathF.Sqrt(_rideWashEnergy) - _rideWashLevel) * _rideWashSlew;
+        float warmWash = (_rideSlowNoise - _rideBodyNoise) * 0.92f
+            + (_rideFastNoise - _rideSlowNoise) * 0.18f;
+        float sample = warmWash * 0.58f * 0.66f * _rideWashLevel;
+        _rideWashEnergy *= _rideWashDecay;
+        if (_rideWashEnergy < 1e-10f) _rideWashEnergy = 0f;
+        if (_rideWashEnergy == 0f && _rideWashLevel < 1e-5f)
+        {
+            _rideWashLevel = 0f;
+            _rideFastNoise = _rideSlowNoise = _rideBodyNoise = 0f;
+        }
 
-        float noise = NextNoise();
-        _rideFastNoise += (noise - _rideFastNoise) * 0.40f;
-        _rideSlowNoise += (_rideFastNoise - _rideSlowNoise) * 0.073f;
-        _rideBodyNoise += (_rideSlowNoise - _rideBodyNoise) * 0.020f;
-        float air = _rideFastNoise - _rideSlowNoise;
-        float bronzeBand = _rideSlowNoise - _rideBodyNoise;
-        float warmWash = bronzeBand * 0.92f + air * 0.18f;
-        _ridePreviousNoise = noise;
-
-        // Ping bajo y levemente modulado: identifica la baqueta sin sobresalir como chapa.
-        _ridePhaseA += 2.0 * Math.PI * 735.0 * _ridePitchScale / _sampleRate;
-        _ridePhaseB += 2.0 * Math.PI * 1185.0 * (2f - _ridePitchScale) / _sampleRate;
-        _ridePhaseC += 2.0 * Math.PI * 83.0 / _sampleRate;
-        float modulation = MathF.Sin((float)_ridePhaseC);
-        float bellBody = MathF.Sin((float)(_ridePhaseA + modulation * 0.34f)) * 0.036f
-            + MathF.Sin((float)(_ridePhaseB - modulation * 0.22f)) * 0.018f;
-
-        int stickLength = Math.Max(1, _sampleRate / 920);
-        float stickEnvelope = _rideAge < stickLength ? 1f - _rideAge / (float)stickLength : 0f;
-        float stick = stickEnvelope > 0f
-            ? (NextNoise() * 0.014f + MathF.Sin((float)_ridePhaseA) * 0.018f) * stickEnvelope
-            : 0f;
-        float wash = warmWash * 0.58f * _rideBrightness;
-
-        _rideAge++;
-        _rideRemaining--;
-        return ((bellBody * _rideBrightness + stick) * bodyEnvelope + wash * washEnvelope)
-            * 0.600f * _rideVelocity;
+        if (transient)
+        {
+            _ridePhaseA += _rideIncrementA;
+            _ridePhaseB += _rideIncrementB;
+            _ridePhaseC += _rideIncrementC;
+            float bronze = MathF.Sin((float)_ridePhaseA) * _rideModeA
+                + MathF.Sin((float)_ridePhaseB) * _rideModeB
+                + MathF.Sin((float)_ridePhaseC) * _rideModeC;
+            _rideModeA *= _rideDecayA;
+            _rideModeB *= _rideDecayB;
+            _rideModeC *= _rideDecayC;
+            float stickProgress = _rideAge / (_sampleRate * 0.004f);
+            float stickEnvelope = MathF.Max(0f, 1f - stickProgress);
+            stickEnvelope *= Math.Clamp(stickProgress * 8f, 0f, 1f);
+            float stick = (_rideFastNoise - _rideBodyNoise) * 0.11f * stickEnvelope;
+            float release = Math.Clamp(_rideRemaining / (_sampleRate * 0.015f), 0f, 1f);
+            sample += (bronze * _rideBrightness + stick) * _rideVelocity * release;
+            _rideAge++;
+            _rideRemaining--;
+        }
+        return sample * 0.600f;
     }
 
     private float ProcessTom()

@@ -447,6 +447,22 @@ internal sealed class AudioEngine : IDisposable
             channels);
     }
 
+    // One call per frame, also in the interleaved path. Only the piano has stereo motion.
+    private void ProcessDualAccompaniment(bool bandActive, out float left, out float right)
+    {
+        float center = _dualMetronome.Process();
+        float pianoLeft = 0f, pianoRight = 0f;
+        if (bandActive)
+        {
+            center += _dualDrums.Process() + _dualBackingBass.Process();
+            _dualPiano.ProcessStereo(out pianoLeft, out pianoRight);
+        }
+        left = center + pianoLeft;
+        right = center + pianoRight;
+        left = Math.Clamp(float.IsFinite(left) ? left : 0f, -0.95f, 0.95f);
+        right = Math.Clamp(float.IsFinite(right) ? right : 0f, -0.95f, 0.95f);
+    }
+
     private bool ShouldPlayDualFollowedAccompaniment(float guitar1Sample, float guitar2Sample, bool followGuitar)
     {
         if (followGuitar != _dualAccompanimentFollowLast)
@@ -1152,7 +1168,7 @@ internal sealed class AudioEngine : IDisposable
                     if (panIsCentered)
                     {
                         int samples = frames * 2;
-                        float accompanimentSample = 0f;
+                        float accompanimentLeft = 0f, accompanimentRight = 0f;
                         for (int i = 0; i < samples; i++)
                         {
                             float abs1 = MathF.Abs(guitar1Output[i]);
@@ -1167,10 +1183,8 @@ internal sealed class AudioEngine : IDisposable
                                     g1CanTriggerAccompaniment ? guitar1Input[frameIndex] : 0f,
                                     g2CanTriggerAccompaniment ? input[frameIndex] : 0f,
                                     accompanimentParameters.AccompanimentFollowGuitar);
-                                float band = bandActive ? _dualDrums.Process() + _dualBackingBass.Process() + _dualPiano.Process() : 0f;
-                                accompanimentSample = _dualMetronome.Process() + band;
-                                accompanimentSample = Math.Clamp(float.IsFinite(accompanimentSample) ? accompanimentSample : 0f, -0.95f, 0.95f);
-                                float absAccompaniment = MathF.Abs(accompanimentSample);
+                                ProcessDualAccompaniment(bandActive, out accompanimentLeft, out accompanimentRight);
+                                float absAccompaniment = MathF.Max(MathF.Abs(accompanimentLeft), MathF.Abs(accompanimentRight));
                                 if (absAccompaniment > accompanimentPeak) accompanimentPeak = absAccompaniment;
                             }
 
@@ -1187,7 +1201,7 @@ internal sealed class AudioEngine : IDisposable
                                 g2PostPanRightPeak = MathF.Max(g2PostPanRightPeak, MathF.Abs(g2Contribution));
                             }
 
-                            float mixed = MixLimiter(g1Contribution + g2Contribution + accompanimentSample);
+                            float mixed = MixLimiter(g1Contribution + g2Contribution + ((i & 1) == 0 ? accompanimentLeft : accompanimentRight));
                             output[i] = mixed;
                             float absMixed = MathF.Abs(mixed);
                             if (absMixed > finalMixPeak) finalMixPeak = absMixed;
@@ -1246,13 +1260,11 @@ internal sealed class AudioEngine : IDisposable
                                 g1CanTriggerAccompaniment ? guitar1Input[frame] : 0f,
                                 g2CanTriggerAccompaniment ? input[frame] : 0f,
                                 accompanimentParameters.AccompanimentFollowGuitar);
-                            float band = bandActive ? _dualDrums.Process() + _dualBackingBass.Process() + _dualPiano.Process() : 0f;
-                            float accompanimentSample = _dualMetronome.Process() + band;
-                            accompanimentSample = Math.Clamp(float.IsFinite(accompanimentSample) ? accompanimentSample : 0f, -0.95f, 0.95f);
-                            accompanimentPeak = MathF.Max(accompanimentPeak, MathF.Abs(accompanimentSample));
+                            ProcessDualAccompaniment(bandActive, out float accompanimentLeft, out float accompanimentRight);
+                            accompanimentPeak = MathF.Max(accompanimentPeak, MathF.Max(MathF.Abs(accompanimentLeft), MathF.Abs(accompanimentRight)));
 
-                            float mixedLeft = MixLimiter(g1ContributionLeft + g2ContributionLeft + accompanimentSample);
-                            float mixedRight = MixLimiter(g1ContributionRight + g2ContributionRight + accompanimentSample);
+                            float mixedLeft = MixLimiter(g1ContributionLeft + g2ContributionLeft + accompanimentLeft);
+                            float mixedRight = MixLimiter(g1ContributionRight + g2ContributionRight + accompanimentRight);
                             output[leftIndex] = mixedLeft;
                             output[rightIndex] = mixedRight;
                             finalMixPeak = MathF.Max(finalMixPeak, MathF.Max(MathF.Abs(mixedLeft), MathF.Abs(mixedRight)));
