@@ -1,3 +1,17 @@
+Amp Accessible 2.41.71 - Bajo Electrico Natural JAWS
+Base estable: 2.41.70 (651d964).
+- Refinamiento exclusivo del timbre, dinamica y articulacion del bajo electrico sintetizado, sin samples ni archivos externos.
+- Ataque de cuerda filtrado de aproximadamente 1,6 a 6 ms segun articulacion, fase y pulsacion variables; microafinacion acotada a menos de +/-1,5 cents normal y +/-2 cents slap, sin modulacion periodica sostenida.
+- Fundamental dominante, segunda armonica moderada y tercera/cuarta reducidas. Filtro dinamico por nota, mas abierto al inicio y cierre gradual; coeficientes calculados al disparar cada nota. Apagado suave y transicion breve al reemplazar una nota.
+- Raiz mas dominante y calida. Quinta mas suave y 8 por ciento mas corta. Octava alta mas liviana, algo mas brillante y 18 por ciento mas corta. Linea melodica con jerarquia dinamica y notas secundarias/de paso amortiguadas, conservando exactamente las notas y sus posiciones ritmicas.
+- Slap: thumb grave, pop mas brillante y corto, ghost notes de ruido filtrado sin oscilador tonal sostenido y de 7 ms. Se elimina el pulso digital alternado; patron, posiciones de golpes y ganancia final global conservados.
+- Logica armonica de 2.41.70 conservada textualmente: seleccion de notas, progresiones, reloj, sincronizacion y registro. Sin cambios en piano/organos/Leslie, bateria/ride/redobles, selector global, F12, Dos Guitarras, grabadora/diagnosticos, NAM, IR, amplificadores, efectos, afinador, looper ni UpdateService.
+Validacion automatica: 720 casos previos de progresion; 720 comparaciones contra 2.41.70 con 22128 eventos de nota identicos en frecuencia y posicion, reinicios y piano encendido/apagado; 1920 casos de senal finita, limites, silencio y reset a 8000/44100/48000/96000 Hz; piano estereo identico en 324 configuraciones y bateria/ride/fills identicos en 18 configuraciones; mezcla offline de Dos Guitarras en 30 configuraciones.
+Articulacion medida sobre 48 variaciones y primeros 50 ms a igual velocidad de entrada: quinta -1,41 dB, octava -2,38 dB, tercera melodica -1,63 dB y nota de paso -3,35 dB respecto de su raiz. Pop con mayor brillo que thumb; ghost independiente de la frecuencia tonal; extremos y reemplazo de nota continuos; filtro estable y microafinacion dentro de limites.
+Balance contra la base en la matriz medida: picos por modo no superiores; cambio RMS Raiz +0,64 dB, Raiz-quinta +0,13 dB, Octavas -0,16 dB, Melodica -0,41 dB, Slap -1,30 dB. No cambia la ganancia final global.
+Rendimiento offline 48 kHz/128 muestras: 2400 bloques por modo, sin asignaciones, sin bloques mayores a 2,667 ms; medias del bajo entre 1,38 y 5,10 microsegundos y maximo observado 22,30 microsegundos. Estas mediciones del generador no certifican el callback completo ni el controlador ASIO.
+Compilacion Release: 0 errores y 7 advertencias preexistentes. Pendiente de validacion perceptual y de dispositivo: escucha, JAWS y Focusrite USB ASIO real, incluyendo errores de entrada/salida, DSP, buffer y captura durante grabacion.
+
 Amp Accessible 2.41.70 - Bajo Armonico Natural JAWS
 Base estable: 2.41.69 (ebc06bf).
 - Cambio exclusivo del timbre del bajo de acompanamiento: parciales en relaciones 2:1, 3:1 y 4:1, sin batimientos por desafinacion entre armonicos.

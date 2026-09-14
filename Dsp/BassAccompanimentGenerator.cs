@@ -11,7 +11,8 @@ internal sealed class BassAccompanimentGenerator
     private static readonly int[] MinorLine = { 0, 7, 8, 7, 3, 5, 7, 10 };
 
     private readonly int _sampleRate;
-    private readonly float _filterAlpha;
+    private readonly float _bodyAlpha;
+    private readonly float _bodyResonanceAlpha;
 
     private bool _enabled;
     private float _bpm = 80f;
@@ -51,6 +52,22 @@ internal sealed class BassAccompanimentGenerator
     private float _harmonic2Gain = 0.14f;
     private float _harmonic3Gain = 0.055f;
     private float _harmonic4Gain = 0.025f;
+    private float _fundamentalGain;
+    private float _attackInverse;
+    private int _transientSamples;
+    private float _noiseAlpha;
+    private float _noiseAmount;
+    private float _filterStartAlpha;
+    private float _filterEndAlpha;
+    private float _spectralLife;
+    private float _spectralDecay;
+    private float _initialPitchOffset;
+    private float _settlingAmount;
+    private float _settlingState;
+    private float _lastNoteOutput;
+    private float _retriggerTail;
+    private int _retriggerRemaining;
+    private int _retriggerTotal;
     private bool _slapPop;
     private bool _slapGhost;
     private uint _noiseState = 0x6D2B79F5u;
@@ -58,8 +75,8 @@ internal sealed class BassAccompanimentGenerator
     public BassAccompanimentGenerator(int sampleRate)
     {
         _sampleRate = Math.Max(8000, sampleRate);
-        // Un polo suave alrededor de 1,2 kHz conserva el cuerpo y quita brillo sintético.
-        _filterAlpha = Math.Clamp((float)(2.0 * Math.PI * 1200.0 / _sampleRate), 0.01f, 0.35f);
+        _bodyAlpha = 1f - MathF.Exp(-2f * MathF.PI * 123f / _sampleRate);
+        _bodyResonanceAlpha = 1f - MathF.Exp(-2f * MathF.PI * 58f / _sampleRate);
         RecalculateTiming();
         Reset();
     }
@@ -148,6 +165,9 @@ internal sealed class BassAccompanimentGenerator
         _bodyState = 0f;
         _bodyResonanceState = 0f;
         _noiseToneState = 0f;
+        _settlingState = 0f;
+        _lastNoteOutput = _retriggerTail = 0f;
+        _retriggerRemaining = 0;
         _slapPop = false;
         _slapGhost = false;
     }
@@ -330,7 +350,22 @@ internal sealed class BassAccompanimentGenerator
         int midi = Math.Clamp(rootMidi + semitoneOffset, 24, 55);
         _frequency = 440f * MathF.Pow(2f, (midi - 69) / 12f);
 
-        _noteTotal = Math.Max(1, (int)(_samplesPerStep * Math.Max(0.4f, durationSteps)));
+        // Articulation only: pitch selection, trigger positions and harmony stay in 2.41.70.
+        int interval = semitoneOffset % 12;
+        bool fifth = _lineMode == 1 && semitoneOffset != 0;
+        bool highOctave = _lineMode == 2 && semitoneOffset == 12;
+        bool melodicSecondary = _lineMode == 3 && interval != 0;
+        bool passing = melodicSecondary && interval != (_chordQuality == 0 ? 4 : 3)
+            && interval != (_chordQuality == 2 ? 6 : 7);
+        float dynamicGain = fifth ? 0.89f : highOctave ? 0.81f
+            : passing ? 0.71f : melodicSecondary ? 0.84f : 1f;
+        float length = fifth ? 0.92f : highOctave ? 0.82f
+            : passing ? 0.78f : melodicSecondary ? 0.94f : 1f;
+        _noteTotal = Math.Max(1, (int)(_samplesPerStep * Math.Max(0.4f, durationSteps) * length));
+        // Crossfade the previous output over a short damped tail, without allocating a voice.
+        _retriggerTail = _lastNoteOutput;
+        _retriggerTotal = Math.Max(1, (int)(_sampleRate * (_lineMode == 4 ? 0.0007f : 0.002f)));
+        _retriggerRemaining = _retriggerTotal;
         _noteRemaining = _noteTotal;
         _noteAge = 0;
         // Una cuerda real no reinicia siempre con la misma fase. Variar el punto de
@@ -349,43 +384,74 @@ internal sealed class BassAccompanimentGenerator
         float pickupPosition = _lineMode == 4
             ? 0.105f + (articulation * 0.075f)
             : 0.18f + (articulation * 0.12f);
-        float detuneCents = NextNoise() * (_lineMode == 4 ? 1.45f : 0.72f);
+        float detuneCents = NextNoise() * (_lineMode == 4 ? 1.25f : 0.90f);
         _noteDetuneRatio = MathF.Pow(2f, detuneCents / 1200f);
-        _noteBrightness = 0.86f + (articulation * 0.28f);
-        _harmonic2Gain = 0.075f + (0.18f * MathF.Abs(MathF.Sin(2f * MathF.PI * pickupPosition)));
-        _harmonic3Gain = 0.020f + (0.115f * MathF.Abs(MathF.Sin(3f * MathF.PI * pickupPosition)));
-        _harmonic4Gain = 0.010f + (0.070f * MathF.Abs(MathF.Sin(4f * MathF.PI * pickupPosition)));
+        // The settling bend plus static detune remain below +/-1.5 cents (2 for slap).
+        float settlingCents = NextNoise() * (_lineMode == 4 ? 0.65f : 0.50f);
+        _initialPitchOffset = MathF.Pow(2f, settlingCents / 1200f) - 1f;
+        _noteBrightness = 0.94f + (articulation * 0.12f);
+        _harmonic2Gain = 0.075f + (0.13f * MathF.Abs(MathF.Sin(2f * MathF.PI * pickupPosition)));
+        _harmonic3Gain = 0.012f + (0.048f * MathF.Abs(MathF.Sin(3f * MathF.PI * pickupPosition)));
+        _harmonic4Gain = 0.004f + (0.020f * MathF.Abs(MathF.Sin(4f * MathF.PI * pickupPosition)));
+        _fundamentalGain = fifth || highOctave ? 0.82f : 0.84f;
 
+        float attackMs = _lineMode == 4 ? (_slapGhost ? 0.5f : _slapPop ? 0.7f : 1.1f)
+            : highOctave ? 1.8f : _lineMode <= 1 ? 3.4f : 2.6f;
+        _attackInverse = 1f / Math.Max(1f, _sampleRate * attackMs * (0.94f + articulation * 0.12f) / 1000f);
+        float transientMs = _lineMode == 4 ? (_slapGhost ? 5f : _slapPop ? 2f : 3f) : 3.5f;
+        _transientSamples = Math.Max(1, (int)(_sampleRate * transientMs * (0.8f + articulation * 0.4f) / 1000f));
+        _noiseAmount = _lineMode == 4 ? (_slapGhost ? 1.8f : _slapPop ? 0.72f : 0.38f)
+            : _lineMode == 0 ? 0.028f : 0.040f;
+        float noiseHz = _lineMode == 4 ? (_slapGhost ? 950f : _slapPop ? 3400f : 1600f) : 1100f;
+        _noiseAlpha = 1f - MathF.Exp(-2f * MathF.PI * noiseHz / _sampleRate);
+        float startHz = _lineMode == 4 ? (_slapGhost ? 1050f : _slapPop ? 3300f : 1700f)
+            : highOctave ? 1700f : _lineMode <= 1 ? 1150f : 1450f;
+        float endHz = _lineMode == 4 ? (_slapGhost ? 650f : _slapPop ? 1500f : 850f)
+            : highOctave ? 800f : _lineMode <= 1 ? 560f : 680f;
+        _filterStartAlpha = 1f - MathF.Exp(-2f * MathF.PI * startHz * _noteBrightness / _sampleRate);
+        _filterEndAlpha = 1f - MathF.Exp(-2f * MathF.PI * endHz * _noteBrightness / _sampleRate);
+        _spectralLife = 1f;
+        _spectralDecay = MathF.Exp(-1f / (_sampleRate * (0.045f + articulation * 0.025f)));
+        _settlingAmount = 0.025f + articulation * 0.020f;
+        _settlingState = 0f;
+
+        if (_lineMode == 3)
+            _noteTotal = Math.Max(1, (int)(_noteTotal * (0.97f + articulation * 0.03f)));
+        if (_lineMode == 4)
+            _noteTotal = _slapGhost ? Math.Max(1, (int)(_sampleRate * 0.007f))
+                : _slapPop ? Math.Max(1, (int)(_noteTotal * 0.72f)) : _noteTotal;
+        _noteRemaining = _noteTotal;
+
+        _filterState = 0f;
         _bodyState = 0f;
         _bodyResonanceState = 0f;
         _noiseToneState = 0f;
-        float humanVelocity = 0.965f + (((NextNoise() + 1f) * 0.5f) * 0.07f);
+        float humanVelocity = 0.97f + (((NextNoise() + 1f) * 0.5f) * 0.06f);
         _velocity = (_lineMode == 4
             ? Math.Clamp(velocity, 0.35f, 1.28f)
-            : Math.Clamp(velocity, 0.35f, 1.05f)) * humanVelocity;
+            // Reserve the previous peak headroom while compressing rhythmic accents slightly.
+            : 0.94f * MathF.Sqrt(Math.Clamp(velocity, 0.35f, 1.05f))) * humanVelocity * dynamicGain;
     }
 
     private float ProcessNote()
     {
-        if (_noteRemaining <= 0) return 0f;
+        if (_noteRemaining <= 0)
+        {
+            _lastNoteOutput = 0f;
+            return 0f;
+        }
 
         float progress = Math.Clamp(_noteAge / (float)Math.Max(1, _noteTotal), 0f, 1f);
         float remaining = 1f - progress;
-        float attackMs = _lineMode == 4
-            ? (_slapGhost ? 0.08f : _slapPop ? 0.12f : 0.20f)
-            : 2.6f;
-        float attack = Math.Clamp(_noteAge / (float)Math.Max(1, (int)(_sampleRate * attackMs / 1000f)), 0f, 1f);
+        float attack = Math.Clamp(_noteAge * _attackInverse, 0f, 1f);
+        attack *= attack * (3f - 2f * attack);
         float envelope = _lineMode == 4
             ? attack * remaining * remaining * remaining * (0.68f + (0.32f * remaining))
             : attack * remaining * (0.50f + (0.50f * remaining));
 
-        // Leve caída inicial de afinación por tensión de cuerda y una desviación
-        // microscópica distinta por nota. El oído la percibe como ejecución real,
-        // no como desafinación.
+        // Nonperiodic settling only at the onset; no sustained vibrato or chorus.
         float bendWindow = MathF.Max(0f, 1f - (_noteAge / (float)Math.Max(1, (int)(_sampleRate * 0.030f))));
-        float bendRatio = 1f + bendWindow * (_lineMode == 4
-            ? (_slapPop ? 0.0085f : _slapGhost ? 0.0030f : 0.0050f)
-            : 0.0012f);
+        float bendRatio = 1f + bendWindow * bendWindow * _initialPitchOffset;
         double increment = (_frequency * _noteDetuneRatio * bendRatio) / _sampleRate;
         _phase1 += increment;
         _phase2 += increment * 2.0;
@@ -404,12 +470,29 @@ internal sealed class BassAccompanimentGenerator
         // 2.41.70: parciales armonicos y decaimiento en segundos. El color de
         // la pulsacion no se estira al bajar el BPM; la fundamental conserva cuerpo.
         float ageSeconds = _noteAge / (float)_sampleRate;
-        float harmonicLife = 1f / (1f + ageSeconds * 5f);
-        float h2Life = 0.24f + 0.76f * harmonicLife;
-        float h3Life = 0.10f + 0.90f * harmonicLife * harmonicLife;
+        float harmonicLife = _spectralLife;
+        _spectralLife = harmonicLife > 1e-12f ? harmonicLife * _spectralDecay : 0f;
+        float h2Life = 0.38f + 0.62f * harmonicLife;
+        float h3Life = 0.025f + 0.975f * harmonicLife * harmonicLife;
         float h4Life = harmonicLife * harmonicLife * harmonicLife;
         float pluck = MathF.Max(0f, 1f - ageSeconds / (_lineMode == 4 ? 0.018f : 0.035f));
         pluck *= pluck;
+
+        float mechanical = 0f;
+        if (_noteAge < _transientSamples)
+        {
+            float noise = NextNoise();
+            _noiseToneState += _noiseAlpha * (noise - _noiseToneState);
+            _settlingState += 0.12f * (_noiseToneState - _settlingState);
+            float transientLife = 1f - _noteAge / (float)_transientSamples;
+            // Both components are filtered; no alternating digital click or raw white noise.
+            mechanical = (_noiseToneState - 0.35f * _settlingState)
+                * _noiseAmount * transientLife * transientLife;
+            float settling = 1f + _settlingState * _settlingAmount * transientLife;
+            h2Life *= settling;
+            h3Life *= settling;
+            h4Life *= settling;
+        }
 
         float raw;
         if (_lineMode == 4)
@@ -418,7 +501,7 @@ internal sealed class BassAccompanimentGenerator
             {
                 // Nota muerta: casi no hay fundamental sostenida; manda la cuerda
                 // contra el traste, con una sombra de afinación para conservar groove.
-                raw = (s1 * 0.12f) + (s2 * 0.10f * h2Life) + (s3 * 0.07f * h3Life);
+                raw = 0f; // Muted string: no sustained pitched oscillator in ghost notes.
             }
             else if (_slapPop)
             {
@@ -437,37 +520,13 @@ internal sealed class BassAccompanimentGenerator
         }
         else
         {
-            raw = (s1 * 0.84f)
+            raw = (s1 * _fundamentalGain)
                 + (s2 * (_harmonic2Gain + (0.045f * pluck)) * h2Life)
                 + (s3 * (_harmonic3Gain + (0.025f * pluck)) * h3Life)
                 + (s4 * _harmonic4Gain * h4Life);
         }
 
-        // Excitación mecánica coloreada. Separamos una componente de alta frecuencia
-        // (dedo/traste) de otra más opaca (contacto con la cuerda), evitando ruido
-        // blanco puro que también delataba el sintetizador.
-        float transientSeconds = _lineMode == 4
-            ? (_slapGhost ? 0.014f : _slapPop ? 0.021f : 0.016f)
-            : 0.010f;
-        int transientSamples = Math.Max(1, (int)(_sampleRate * transientSeconds));
-        if (_noteAge < transientSamples)
-        {
-            float pluckEnvelope = 1f - (_noteAge / (float)transientSamples);
-            pluckEnvelope *= pluckEnvelope;
-            float noise = NextNoise();
-            _noiseToneState += 0.20f * (noise - _noiseToneState);
-            float highNoise = noise - _noiseToneState;
-            float mechanical = (highNoise * 0.78f) + (_noiseToneState * 0.22f);
-            float noiseAmount = _lineMode == 4
-                ? (_slapGhost ? 0.92f : _slapPop ? 0.62f : 0.38f)
-                : 0.050f;
-            raw += mechanical * noiseAmount * pluckEnvelope;
-            if (_lineMode == 4 && !_slapGhost)
-            {
-                float click = ((_noteAge & 1) == 0 ? 1f : -1f) * (_slapPop ? 0.46f : 0.27f);
-                raw += click * pluckEnvelope;
-            }
-        }
+        raw += mechanical;
 
         // Menos saturación fija que en 2.41.47: el carácter debe venir de la cuerda
         // y el ataque, no de un soft-clip constante.
@@ -477,29 +536,41 @@ internal sealed class BassAccompanimentGenerator
         raw = FastDspMath.SoftClip(raw * drive);
 
         // Filtro dinámico: brillante al ataque y progresivamente más oscuro.
-        float spectralLife = 0.34f + (0.66f * harmonicLife);
-        float activeFilterAlpha = _lineMode == 4
-            ? Math.Clamp(_filterAlpha * (2.25f + (1.25f * spectralLife)) * _noteBrightness, 0.05f, 0.58f)
-            : Math.Clamp(_filterAlpha * (0.52f + (0.82f * spectralLife)) * _noteBrightness, 0.025f, 0.30f);
+        float activeFilterAlpha = _filterEndAlpha + (_filterStartAlpha - _filterEndAlpha) * harmonicLife;
         _filterState += activeFilterAlpha * (raw - _filterState);
 
         // Dos escalas lentas de cuerpo simulan la transferencia de energía de cuerda
         // a instrumento/caja y evitan que quede una senoide desnuda en la cola.
-        _bodyState += 0.016f * (_filterState - _bodyState);
+        _bodyState += _bodyAlpha * (_filterState - _bodyState);
         float bodyDrive = _filterState - _bodyState;
-        _bodyResonanceState += 0.0075f * (bodyDrive - _bodyResonanceState);
+        _bodyResonanceState += _bodyResonanceAlpha * (bodyDrive - _bodyResonanceState);
         float bodyMix = (_filterState * 0.86f) + (_bodyState * 0.10f) + (_bodyResonanceState * 0.04f);
 
         _noteAge++;
         _noteRemaining--;
+        float output;
         if (_lineMode == 4)
         {
-            float brightMix = _slapGhost ? 0.72f : _slapPop ? 0.76f : 0.61f;
-            float slap = (bodyMix * (1f - brightMix)) + (raw * brightMix);
+            // Keep the dynamic filter in every articulation, including the pop.
             float articulationGain = _slapGhost ? 0.86f : _slapPop ? 1.20f : 1.10f;
-            return slap * envelope * _velocity * articulationGain;
+            float popAttack = _slapPop ? 1f + 0.16f * pluck : 1f;
+            output = bodyMix * envelope * _velocity * articulationGain * popAttack;
         }
-        return bodyMix * envelope * _velocity * 0.76f;
+        else
+            output = bodyMix * envelope * _velocity * 0.76f;
+
+        // Smooth damping during the final 6 ms, on top of the existing note envelope.
+        float release = Math.Clamp(_noteRemaining / (_sampleRate * 0.006f), 0f, 1f);
+        output *= release * release * (3f - 2f * release);
+        if (_retriggerRemaining > 0)
+        {
+            float tail = _retriggerRemaining / (float)_retriggerTotal;
+            tail *= tail * (3f - 2f * tail);
+            output = output * (1f - tail) + _retriggerTail * tail;
+            _retriggerRemaining--;
+        }
+        _lastNoteOutput = output;
+        return output;
     }
 
     private static float FastSine(double phase)
