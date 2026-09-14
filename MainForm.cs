@@ -411,12 +411,30 @@ public sealed class MainForm : Form, IMessageFilter
     private static int EncodeAccompanimentKey(int key, bool minor)
         => Math.Clamp(key, 0, 11) + (minor ? 12 : 0);
 
-    private readonly ComboBox _backingBassKey = new();
+    // Legacy files can contain different keys. Preserve piano-only arrangements;
+    // otherwise use the bass key. New saves store the shared key in both fields.
+    private int GetSharedAccompanimentKeyIndex()
+        => Math.Clamp(_accompanimentKey.SelectedIndex, 0, 23);
+
+    private void SetSharedAccompanimentKeyIndex(int index)
+        => _accompanimentKey.SelectedIndex = Math.Clamp(index, 0, 23);
+
+    private static int ResolveLegacyAccompanimentKey(int bassKey, bool bassMinor, int pianoKey, bool bassEnabled, bool pianoEnabled)
+    {
+        if (pianoEnabled && pianoKey is >= 0 and <= 23)
+            return pianoKey;
+        if (bassEnabled && bassKey is >= 0 and <= 11)
+            return EncodeAccompanimentKey(bassKey, bassMinor);
+        if (pianoKey is >= 0 and <= 23)
+            return pianoKey;
+        return 7;
+    }
+
+    private readonly ComboBox _accompanimentKey = new();
     private readonly ComboBox _backingBassLine = new();
     private readonly NumericUpDown _backingBassVolume = CreateDecimalControl(0, 100, 28, 1m, decimals: 0);
     private readonly CheckBox _pianoEnabled = new();
     private readonly ComboBox _pianoSound = new();
-    private readonly ComboBox _pianoKey = new();
     private readonly ComboBox _pianoProgression = new();
     private readonly TextBox _pianoCustomProgression = new();
     private readonly TextBox _pianoCustomProgressionName = new();
@@ -2480,16 +2498,16 @@ public sealed class MainForm : Form, IMessageFilter
         AddLabeledControl(table, "Volumen de &batería, 0 a 100 por ciento:",
             ConfigureNumeric(_drumVolume, "Volumen de la batería de acompañamiento"));
 
+        ConfigureCombo(_accompanimentKey, "Tonalidad mayor o menor del acompañamiento",
+            "Esta tonalidad se aplica simultáneamente al bajo y al piano u órgano de acompañamiento.");
+        _accompanimentKey.Items.AddRange(AccompanimentKeys);
+        _accompanimentKey.SelectedIndex = 7;
+        AddLabeledControl(table, "&Tonalidad del acompañamiento:", _accompanimentKey);
+
         _backingBassEnabled.Text = "Activar ba&jo de acompañamiento";
         _backingBassEnabled.AccessibleName = "Activar o desactivar bajo de acompañamiento";
-        _backingBassEnabled.AccessibleDescription = "El bajo comparte el BPM y el patrón rítmico de la batería, con tonalidad, modo, línea y volumen independientes.";
+        _backingBassEnabled.AccessibleDescription = "El bajo comparte el BPM y el patrón rítmico de la batería y la tonalidad global con el piano. Su línea y volumen son independientes.";
         AddLabeledControl(table, "Bajo:", _backingBassEnabled);
-
-        ConfigureCombo(_backingBassKey, "Tonalidad mayor o menor del bajo",
-            "Seleccione una de las 24 tonalidades mayores o menores para el bajo de acompañamiento.");
-        _backingBassKey.Items.AddRange(AccompanimentKeys);
-        _backingBassKey.SelectedIndex = 7;
-        AddLabeledControl(table, "&Tonalidad mayor o menor del bajo:", _backingBassKey);
 
         ConfigureCombo(_backingBassLine, "Tipo de línea de bajo",
             "Seleccione raíz, raíz quinta, octavas, línea melódica simple o Slap contundente con thumb y pop bien marcados.");
@@ -2509,17 +2527,9 @@ public sealed class MainForm : Form, IMessageFilter
 
         _pianoEnabled.Text = "Activar &piano u órgano de acompañamiento";
         _pianoEnabled.AccessibleName = "Activar o desactivar piano u órgano de acompañamiento";
-        _pianoEnabled.AccessibleDescription = "El teclado comparte el tempo global y puede usar piano u órgano con tonalidad, progresión, estilo, sonido y volumen propios.";
+        _pianoEnabled.AccessibleDescription = "El teclado comparte el tempo global y la tonalidad con el bajo. Su progresión, estilo, sonido y volumen son propios.";
         AddLabeledControl(table, "Piano u órgano:", _pianoEnabled);
 
-        ConfigureCombo(_pianoKey, "Tonalidad mayor o menor del piano",
-            "Seleccione tonalidad mayor o menor. Las tonalidades menores cambian realmente la armonía de la progresión, no sólo el nombre.");
-        _pianoKey.Items.AddRange(AccompanimentKeys);
-        _pianoKey.SelectedIndex = 7;
-        AddLabeledControl(table, "Tonalidad mayor o menor del pia&no:", _pianoKey);
-
-        // 2.41.52: por pedido del usuario, el tipo de piano/órgano queda inmediatamente
-        // después de Tonalidad para que el recorrido con JAWS siga un orden musical lógico.
         ConfigureCombo(_pianoSound, "Tipo de piano u órgano",
             "Seleccione Piano acústico cálido, Piano eléctrico Rhodes, Piano Worship suave, Grand Piano / Concert Grand u Órgano Hammond Worship con Leslie lento o rápido.");
         _pianoSound.Items.AddRange(new object[]
@@ -3839,7 +3849,11 @@ public sealed class MainForm : Form, IMessageFilter
                 SetStatus("Bajo de acompañamiento activado. Pulse F4 para iniciar el audio.");
             }
         };
-        _backingBassKey.SelectedIndexChanged += (_, _) => _engine.RequestMetronomeReset();
+        _accompanimentKey.SelectedIndexChanged += (_, _) =>
+        {
+            _engine.RequestMetronomeReset();
+            SetStatus($"Tonalidad del acompañamiento: {_accompanimentKey.SelectedItem}. Aplicada al bajo y al piano.");
+        };
         _backingBassLine.SelectedIndexChanged += (_, _) => _engine.RequestMetronomeReset();
         _pianoEnabled.CheckedChanged += (_, _) =>
         {
@@ -3852,7 +3866,6 @@ public sealed class MainForm : Form, IMessageFilter
                 SetStatus("Piano de acompañamiento activado. Pulse F4 para iniciar el audio.");
         };
         _pianoSound.SelectedIndexChanged += (_, _) => _engine.RequestMetronomeReset();
-        _pianoKey.SelectedIndexChanged += (_, _) => _engine.RequestMetronomeReset();
         _pianoProgression.SelectedIndexChanged += (_, _) =>
         {
             _engine.RequestMetronomeReset();
@@ -4048,11 +4061,10 @@ public sealed class MainForm : Form, IMessageFilter
         yield return _drumPattern;
         yield return _drumVolume;
         yield return _backingBassEnabled;
-        yield return _backingBassKey;
+        yield return _accompanimentKey;
         yield return _backingBassLine;
         yield return _backingBassVolume;
         yield return _pianoEnabled;
-        yield return _pianoKey;
         yield return _pianoSound;
         yield return _pianoProgression;
         yield return _pianoCustomProgression;
@@ -4674,8 +4686,8 @@ public sealed class MainForm : Form, IMessageFilter
                 _metronomeMeter.SelectedIndex = scene.SceneMetronomeBeatsPerBar switch { 2 => 0, 3 => 1, 6 => 3, _ => 2 };
                 _metronomeAccent.Checked = scene.SceneMetronomeAccentFirstBeat; SetNumeric(_metronomeVolume, scene.SceneMetronomeVolumePercent);
                 _drumsEnabled.Checked = scene.SceneDrumsEnabled; _drumPattern.SelectedIndex = Math.Clamp(scene.SceneDrumPattern, 0, 5); SetNumeric(_drumVolume, scene.SceneDrumVolumePercent);
-                _backingBassEnabled.Checked = scene.SceneBackingBassEnabled; _backingBassKey.SelectedIndex = EncodeAccompanimentKey(scene.SceneBackingBassKey, scene.SceneBackingBassMinor); _backingBassLine.SelectedIndex = Math.Clamp(scene.SceneBackingBassLine, 0, 4); SetNumeric(_backingBassVolume, scene.SceneBackingBassVolumePercent);
-                _pianoEnabled.Checked = scene.ScenePianoEnabled; _pianoSound.SelectedIndex = Math.Clamp(scene.ScenePianoSound, 0, 5); _pianoKey.SelectedIndex = Math.Clamp(scene.ScenePianoKey, 0, 23); _pianoProgression.SelectedIndex = Math.Clamp(scene.ScenePianoProgression, 0, 5); _pianoCustomProgression.Text = string.IsNullOrWhiteSpace(scene.ScenePianoCustomProgression) ? "I, V, vi, IV" : scene.ScenePianoCustomProgression; _pianoStyle.SelectedIndex = Math.Clamp(scene.ScenePianoStyle, 0, 8); SetNumeric(_pianoVolume, scene.ScenePianoVolumePercent);
+                _backingBassEnabled.Checked = scene.SceneBackingBassEnabled; SetSharedAccompanimentKeyIndex(ResolveLegacyAccompanimentKey(scene.SceneBackingBassKey, scene.SceneBackingBassMinor, scene.ScenePianoKey, scene.SceneBackingBassEnabled, scene.ScenePianoEnabled)); _backingBassLine.SelectedIndex = Math.Clamp(scene.SceneBackingBassLine, 0, 4); SetNumeric(_backingBassVolume, scene.SceneBackingBassVolumePercent);
+                _pianoEnabled.Checked = scene.ScenePianoEnabled; _pianoSound.SelectedIndex = Math.Clamp(scene.ScenePianoSound, 0, 5); _pianoProgression.SelectedIndex = Math.Clamp(scene.ScenePianoProgression, 0, 5); _pianoCustomProgression.Text = string.IsNullOrWhiteSpace(scene.ScenePianoCustomProgression) ? "I, V, vi, IV" : scene.ScenePianoCustomProgression; _pianoStyle.SelectedIndex = Math.Clamp(scene.ScenePianoStyle, 0, 8); SetNumeric(_pianoVolume, scene.ScenePianoVolumePercent);
                 _engine.RequestMetronomeReset();
             }
             _rememberedChannelIndex = _channelCombo.SelectedIndex;
@@ -4894,13 +4906,13 @@ public sealed class MainForm : Form, IMessageFilter
             SceneDrumPattern = Math.Clamp(_drumPattern.SelectedIndex, 0, 5),
             SceneDrumVolumePercent = (float)_drumVolume.Value,
             SceneBackingBassEnabled = _backingBassEnabled.Checked,
-            SceneBackingBassKey = DecodeAccompanimentKey(_backingBassKey.SelectedIndex).Key,
-            SceneBackingBassMinor = DecodeAccompanimentKey(_backingBassKey.SelectedIndex).Minor,
+            SceneBackingBassKey = GetSharedAccompanimentKeyIndex() % 12,
+            SceneBackingBassMinor = GetSharedAccompanimentKeyIndex() >= 12,
             SceneBackingBassLine = Math.Clamp(_backingBassLine.SelectedIndex, 0, 4),
             SceneBackingBassVolumePercent = (float)_backingBassVolume.Value,
             ScenePianoEnabled = _pianoEnabled.Checked,
             ScenePianoSound = Math.Clamp(_pianoSound.SelectedIndex, 0, 5),
-            ScenePianoKey = Math.Clamp(_pianoKey.SelectedIndex, 0, 23),
+            ScenePianoKey = GetSharedAccompanimentKeyIndex(),
             ScenePianoProgression = Math.Clamp(_pianoProgression.SelectedIndex, 0, 5),
             ScenePianoCustomProgression = _pianoCustomProgression.Text.Trim(),
             ScenePianoStyle = Math.Clamp(_pianoStyle.SelectedIndex, 0, 8),
@@ -5098,12 +5110,12 @@ public sealed class MainForm : Form, IMessageFilter
                 _drumPattern.SelectedIndex = Math.Clamp(scene.SceneDrumPattern, 0, 5);
                 SetNumeric(_drumVolume, scene.SceneDrumVolumePercent);
                 _backingBassEnabled.Checked = scene.SceneBackingBassEnabled;
-                _backingBassKey.SelectedIndex = EncodeAccompanimentKey(scene.SceneBackingBassKey, scene.SceneBackingBassMinor);
+                SetSharedAccompanimentKeyIndex(ResolveLegacyAccompanimentKey(scene.SceneBackingBassKey, scene.SceneBackingBassMinor, scene.ScenePianoKey, scene.SceneBackingBassEnabled, scene.ScenePianoEnabled));
                 _backingBassLine.SelectedIndex = Math.Clamp(scene.SceneBackingBassLine, 0, 4);
                 SetNumeric(_backingBassVolume, scene.SceneBackingBassVolumePercent);
                 _pianoEnabled.Checked = scene.ScenePianoEnabled;
                 _pianoSound.SelectedIndex = Math.Clamp(scene.ScenePianoSound, 0, 5);
-                _pianoKey.SelectedIndex = Math.Clamp(scene.ScenePianoKey, 0, 23);
+
                 _pianoProgression.SelectedIndex = Math.Clamp(scene.ScenePianoProgression, 0, 5);
                 _pianoCustomProgression.Text = string.IsNullOrWhiteSpace(scene.ScenePianoCustomProgression) ? "I, V, vi, IV" : scene.ScenePianoCustomProgression;
                 _pianoStyle.SelectedIndex = Math.Clamp(scene.ScenePianoStyle, 0, 8);
@@ -6386,13 +6398,13 @@ public sealed class MainForm : Form, IMessageFilter
             DrumPattern = Math.Clamp(_drumPattern.SelectedIndex, 0, 5),
             DrumVolumePercent = (float)_drumVolume.Value,
             BackingBassEnabled = _backingBassEnabled.Checked,
-            BackingBassKey = DecodeAccompanimentKey(_backingBassKey.SelectedIndex).Key,
-            BackingBassMinor = DecodeAccompanimentKey(_backingBassKey.SelectedIndex).Minor,
+            BackingBassKey = GetSharedAccompanimentKeyIndex() % 12,
+            BackingBassMinor = GetSharedAccompanimentKeyIndex() >= 12,
             BackingBassLine = Math.Clamp(_backingBassLine.SelectedIndex, 0, 4),
             BackingBassVolumePercent = (float)_backingBassVolume.Value,
             PianoEnabled = _pianoEnabled.Checked,
             PianoSound = Math.Clamp(_pianoSound.SelectedIndex, 0, 5),
-            PianoKey = Math.Clamp(_pianoKey.SelectedIndex, 0, 23),
+            PianoKey = GetSharedAccompanimentKeyIndex(),
             PianoProgression = Math.Clamp(_pianoProgression.SelectedIndex, 0, 5),
             PianoCustomProgression = _pianoCustomProgression.Text.Trim(),
             PianoStyle = Math.Clamp(_pianoStyle.SelectedIndex, 0, 8),
@@ -6484,12 +6496,12 @@ public sealed class MainForm : Form, IMessageFilter
             _drumPattern.SelectedIndex = Math.Clamp(scene.DrumPattern, 0, 5);
             SetNumeric(_drumVolume, scene.DrumVolumePercent);
             _backingBassEnabled.Checked = scene.BackingBassEnabled;
-            _backingBassKey.SelectedIndex = EncodeAccompanimentKey(scene.BackingBassKey, scene.BackingBassMinor);
+            SetSharedAccompanimentKeyIndex(ResolveLegacyAccompanimentKey(scene.BackingBassKey, scene.BackingBassMinor, scene.PianoKey, scene.BackingBassEnabled, scene.PianoEnabled));
             _backingBassLine.SelectedIndex = Math.Clamp(scene.BackingBassLine, 0, 4);
             SetNumeric(_backingBassVolume, scene.BackingBassVolumePercent);
             _pianoEnabled.Checked = scene.PianoEnabled;
             _pianoSound.SelectedIndex = Math.Clamp(scene.PianoSound, 0, 5);
-            _pianoKey.SelectedIndex = Math.Clamp(scene.PianoKey, 0, 23);
+
             _pianoProgression.SelectedIndex = Math.Clamp(scene.PianoProgression, 0, 5);
             _pianoCustomProgression.Text = string.IsNullOrWhiteSpace(scene.PianoCustomProgression) ? "I, V, vi, IV" : scene.PianoCustomProgression;
             _pianoStyle.SelectedIndex = Math.Clamp(scene.PianoStyle, 0, 8);
@@ -7294,12 +7306,12 @@ public sealed class MainForm : Form, IMessageFilter
         _drumPattern.SelectedIndex = Math.Clamp(_audioPreferences.DrumPattern, 0, 5);
         SetNumeric(_drumVolume, _audioPreferences.DrumVolumePercent);
         _backingBassEnabled.Checked = _audioPreferences.BackingBassEnabled;
-        _backingBassKey.SelectedIndex = EncodeAccompanimentKey(_audioPreferences.BackingBassKey, _audioPreferences.BackingBassMinor);
+        SetSharedAccompanimentKeyIndex(ResolveLegacyAccompanimentKey(_audioPreferences.BackingBassKey, _audioPreferences.BackingBassMinor, _audioPreferences.PianoKey, _audioPreferences.BackingBassEnabled, _audioPreferences.PianoEnabled));
         _backingBassLine.SelectedIndex = Math.Clamp(_audioPreferences.BackingBassLine, 0, 4);
         SetNumeric(_backingBassVolume, _audioPreferences.BackingBassVolumePercent);
         _pianoEnabled.Checked = _audioPreferences.PianoEnabled;
         _pianoSound.SelectedIndex = Math.Clamp(_audioPreferences.PianoSound, 0, 5);
-        _pianoKey.SelectedIndex = Math.Clamp(_audioPreferences.PianoKey, 0, 23);
+
         _pianoProgression.SelectedIndex = Math.Clamp(_audioPreferences.PianoProgression, 0, 5);
         _pianoCustomProgression.Text = string.IsNullOrWhiteSpace(_audioPreferences.PianoCustomProgression) ? "I, V, vi, IV" : _audioPreferences.PianoCustomProgression;
         _pianoStyle.SelectedIndex = Math.Clamp(_audioPreferences.PianoStyle, 0, 8);
@@ -7397,13 +7409,13 @@ public sealed class MainForm : Form, IMessageFilter
         _audioPreferences.DrumPattern = Math.Clamp(_drumPattern.SelectedIndex, 0, 5);
         _audioPreferences.DrumVolumePercent = (float)_drumVolume.Value;
         _audioPreferences.BackingBassEnabled = _backingBassEnabled.Checked;
-        _audioPreferences.BackingBassKey = DecodeAccompanimentKey(_backingBassKey.SelectedIndex).Key;
-        _audioPreferences.BackingBassMinor = DecodeAccompanimentKey(_backingBassKey.SelectedIndex).Minor;
+        _audioPreferences.BackingBassKey = GetSharedAccompanimentKeyIndex() % 12;
+        _audioPreferences.BackingBassMinor = GetSharedAccompanimentKeyIndex() >= 12;
         _audioPreferences.BackingBassLine = Math.Clamp(_backingBassLine.SelectedIndex, 0, 4);
         _audioPreferences.BackingBassVolumePercent = (float)_backingBassVolume.Value;
         _audioPreferences.PianoEnabled = _pianoEnabled.Checked;
         _audioPreferences.PianoSound = Math.Clamp(_pianoSound.SelectedIndex, 0, 5);
-        _audioPreferences.PianoKey = Math.Clamp(_pianoKey.SelectedIndex, 0, 23);
+        _audioPreferences.PianoKey = GetSharedAccompanimentKeyIndex();
         _audioPreferences.PianoProgression = Math.Clamp(_pianoProgression.SelectedIndex, 0, 5);
         _audioPreferences.PianoCustomProgression = _pianoCustomProgression.Text.Trim();
         _audioPreferences.PianoStyle = Math.Clamp(_pianoStyle.SelectedIndex, 0, 8);
@@ -7588,10 +7600,10 @@ public sealed class MainForm : Form, IMessageFilter
             text.AppendLine("Explorador de carpeta IR: sin carpeta preparada");
         }
         text.AppendLine("Cambio de tipo de reverb: limpieza automática de la cola anterior y fundido corto sin clics; no es necesario apagar y volver a activar el efecto");
-        var bassTonality = DecodeAccompanimentKey(_backingBassKey.SelectedIndex);
-        text.AppendLine($"Bajo 2.41.68: {(_backingBassEnabled.Checked ? "ACTIVO" : "inactivo")}; tonalidad mayor o menor {_backingBassKey.SelectedItem}; índice combinado {_backingBassKey.SelectedIndex}; BackingBassKey {bassTonality.Key}; BackingBassMinor {bassTonality.Minor}; línea {_backingBassLine.SelectedItem}; volumen {_backingBassVolume.Value:0} %.");
+        text.AppendLine($"Tonalidad del acompañamiento: {_accompanimentKey.SelectedItem}; aplicada simultáneamente al bajo y al piano.");
+        text.AppendLine($"Bajo 2.41.69: {(_backingBassEnabled.Checked ? "ACTIVO" : "inactivo")}; línea {_backingBassLine.SelectedItem}; volumen {_backingBassVolume.Value:0} %.");
         string pianoProgressionDetail = _pianoProgression.SelectedIndex == 5 ? $"; grados {_pianoCustomProgression.Text}" : string.Empty;
-        text.AppendLine($"Teclas 2.41.68: {(_pianoEnabled.Checked ? "ACTIVO" : "inactivo")}; sonido {_pianoSound.SelectedItem}; tonalidad {_pianoKey.SelectedItem}; progresión {_pianoProgression.SelectedItem}{pianoProgressionDetail}; estilo {_pianoStyle.SelectedItem}; volumen {_pianoVolume.Value:0} %; Control+F12 on/off.");
+        text.AppendLine($"Teclas 2.41.69: {(_pianoEnabled.Checked ? "ACTIVO" : "inactivo")}; sonido {_pianoSound.SelectedItem}; tonalidad {_accompanimentKey.SelectedItem}; progresión {_pianoProgression.SelectedItem}{pianoProgressionDetail}; estilo {_pianoStyle.SelectedItem}; volumen {_pianoVolume.Value:0} %; Control+F12 on/off.");
         string tunerTargetDiagnostic = _twoGuitarMode.Checked ? SelectedTunerGuitarName : "rig principal / entrada seleccionada";
         text.AppendLine($"Afinador: {(_tunerEnabled.Checked ? "ACTIVO" : "inactivo")}; fuente = {tunerTargetDiagnostic}; silenciar sólo fuente afinada {(_tunerMuteOutput.Checked ? "sí" : "no")}; guía sonora {(_tunerSoundGuide.Checked ? "activa" : "inactiva")}; F9 leer, Control+F9 cambiar guitarra en modo dual.");
         string wahMode = _autoWahModeCombo.SelectedIndex == 1 ? "MANUAL / PEDAL DE EXPRESIÓN" : "AUTO POR DINÁMICA";
@@ -9384,13 +9396,13 @@ public sealed class MainForm : Form, IMessageFilter
             DrumPattern = Math.Clamp(_drumPattern.SelectedIndex, 0, 5),
             DrumVolumePercent = (float)_drumVolume.Value,
             BackingBassEnabled = _backingBassEnabled.Checked,
-            BackingBassKey = DecodeAccompanimentKey(_backingBassKey.SelectedIndex).Key,
-            BackingBassMinor = DecodeAccompanimentKey(_backingBassKey.SelectedIndex).Minor,
+            BackingBassKey = GetSharedAccompanimentKeyIndex() % 12,
+            BackingBassMinor = GetSharedAccompanimentKeyIndex() >= 12,
             BackingBassLine = Math.Clamp(_backingBassLine.SelectedIndex, 0, 4),
             BackingBassVolumePercent = (float)_backingBassVolume.Value,
             PianoEnabled = _pianoEnabled.Checked,
             PianoSound = Math.Clamp(_pianoSound.SelectedIndex, 0, 5),
-            PianoKey = Math.Clamp(_pianoKey.SelectedIndex, 0, 23),
+            PianoKey = GetSharedAccompanimentKeyIndex(),
             PianoProgression = Math.Clamp(_pianoProgression.SelectedIndex, 0, 5),
             PianoCustomProgressionPack1 = pianoPack1,
             PianoCustomProgressionPack2 = pianoPack2,
@@ -10362,8 +10374,7 @@ public sealed class MainForm : Form, IMessageFilter
         string drums = _drumsEnabled.Checked ? "batería activa" : "batería apagada";
         string bass = _backingBassEnabled.Checked ? "bajo activo" : "bajo apagado";
         string piano = _pianoEnabled.Checked ? "piano activo" : "piano apagado";
-        string key = _backingBassKey.SelectedItem?.ToString() ?? "tonalidad no definida";
-        string pianoKey = _pianoKey.SelectedItem?.ToString() ?? "tonalidad no definida";
+        string key = _accompanimentKey.SelectedItem?.ToString() ?? "tonalidad no definida";
         string recording = _engine.IsPracticeRecording
             ? $"grabando, {_engine.PracticeRecordingSeconds:0} segundos"
             : "grabadora detenida";
@@ -10385,7 +10396,7 @@ public sealed class MainForm : Form, IMessageFilter
             ? $"afinador activo para {(_twoGuitarMode.Checked ? SelectedTunerGuitarName : "rig principal")}"
             : "afinador apagado";
 
-        SetStatus($"Estado general. {bank}. {amp}. {nam}. {ir}. {tuner}. {_metronomeBpm.Value:0} BPM. Tonalidad del bajo {key}. Tonalidad del piano {pianoKey}. {drums}. {bass}. {piano}. {recording}. {looper}. {midi}.");
+        SetStatus($"Estado general. {bank}. {amp}. {nam}. {ir}. {tuner}. {_metronomeBpm.Value:0} BPM. Tonalidad compartida de bajo y piano {key}. {drums}. {bass}. {piano}. {recording}. {looper}. {midi}.");
     }
 
     private void TogglePracticeRecordingShortcut()
@@ -10594,7 +10605,7 @@ public sealed class MainForm : Form, IMessageFilter
     private void ToggleBackingBassShortcut()
     {
         _backingBassEnabled.Checked = !_backingBassEnabled.Checked;
-        string key = _backingBassKey.SelectedItem?.ToString() ?? "tonalidad actual";
+        string key = _accompanimentKey.SelectedItem?.ToString() ?? "tonalidad actual";
         SetStatus($"Bajo de acompañamiento {(_backingBassEnabled.Checked ? "activado" : "desactivado")}. {key}, {_metronomeBpm.Value:0} BPM.");
     }
 
@@ -11542,7 +11553,7 @@ public sealed class MainForm : Form, IMessageFilter
         UpdateParameters();
         _engine.RequestMetronomeReset();
         string sound = _pianoSound.SelectedItem?.ToString() ?? "sonido actual";
-        string key = _pianoKey.SelectedItem?.ToString() ?? "tonalidad actual";
+        string key = _accompanimentKey.SelectedItem?.ToString() ?? "tonalidad actual";
         string progression = _pianoProgression.SelectedIndex == 5
             ? $"personalizada {_pianoCustomProgression.Text}"
             : (_pianoProgression.SelectedItem?.ToString() ?? "progresión actual");
@@ -11579,7 +11590,7 @@ public sealed class MainForm : Form, IMessageFilter
         _engine.RequestMetronomeReset();
 
         string pattern = _drumPattern.SelectedItem?.ToString() ?? "patrón actual";
-        string key = _backingBassKey.SelectedItem?.ToString() ?? "tonalidad actual";
+        string key = _accompanimentKey.SelectedItem?.ToString() ?? "tonalidad actual";
         string piano = _pianoSound.SelectedItem?.ToString() ?? "piano actual";
 
         if (enable)

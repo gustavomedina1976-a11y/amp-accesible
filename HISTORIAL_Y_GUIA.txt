@@ -1,3 +1,10 @@
+Amp Accessible 2.41.69 - Tonalidad Compartida Acompanamiento JAWS
+Base estable: 2.41.68 (33764f0).
+- Preparacion de la nueva version: numero de version y BuildName actualizados en la aplicacion y version sincronizada en el proyecto y el instalador.
+- Un solo selector global de 24 tonalidades mayores/menores controla bajo y piano u organo. Nombre y descripcion accesibles, estado general y diagnostico indican la tonalidad compartida.
+- Preferencias, bancos y escenas guardan ambos campos anteriores con la misma tonalidad, manteniendo compatibilidad. Al cargar datos antiguos con tonalidades diferentes, se usa la del piano si solo estaba activado el piano; en los demas casos, la del bajo.
+- Se conserva la base de audio 2.41.68.
+
 Amp Accessible 2.41.68 - Piano Leslie Estereo y Ride Natural JAWS
 Base estable: 2.41.67 (dc53154).
 - Bajo y piano comparten las mismas 24 tonalidades mayores/menores. Sol mayor sigue en índice 7. El bajo conserva key 0..11 y minor booleano en preferencias, bancos y escenas, incluidas las completas de Dos Guitarras.
