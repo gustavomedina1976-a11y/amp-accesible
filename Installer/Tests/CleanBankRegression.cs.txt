@@ -1,0 +1,303 @@
+using System.Reflection;
+using System.Text.Json;
+using System.Diagnostics;
+using GDMAmpAccessible;
+using GDMAmpAccessible.Models;
+using GDMAmpAccessible.Persistence;
+using GDMAmpAccessible.Dsp;
+using GDMAmpAccessible.Audio;
+
+internal static class TestPaths
+{
+    public static string Root = "";
+    public static string GetFolderPath(Environment.SpecialFolder folder)
+    {
+        string path = Path.Combine(Root, folder.ToString());
+        Directory.CreateDirectory(path);
+        return path;
+    }
+}
+
+internal static class CheckClean
+{
+    private static string J<T>(T value) => JsonSerializer.Serialize(value);
+    private static void Check(bool condition, string message)
+    { if (!condition) throw new Exception(message); }
+    private static T Get<T>(object target, string field) => (T)target.GetType().GetField(field, BindingFlags.Instance|BindingFlags.NonPublic)!.GetValue(target)!;
+    private static object? Call(object target, string method, params object[] args) => target.GetType().GetMethod(method, BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(target,args);
+    private static DspParameters Parameters(AudioProcessor p) => Get<DspParameters>(p,"_pendingParameters");
+    private static DspParameters Sound(ScenePreset s) => JsonSerializer.Deserialize<DspParameters>(J(s))! with { Revision = 1 };
+    private static readonly string[] Names = {"Clean Warm","Clean Worship","Clean Arpeggio","Clean Rhythm","Clean Ambient"};
+
+    [STAThread]
+    private static void Main(string[] args)
+    {
+        try {
+        TestPaths.Root = Path.Combine(args[0],"TestData",Guid.NewGuid().ToString("N"));
+        if (args.Contains("--ui-only")) { InterfaceAndDual(); return; }
+        MetadataAndPersistence();
+        AudioRegression();
+        LevelsAndTransitions();
+        InterfaceAndDual();
+        Console.WriteLine("PASS: all Clean bank checks. Hardware/JAWS/listening are not certified by these offline tests.");
+        } catch(Exception ex) { Console.Error.WriteLine(ex); Environment.Exit(1); }
+    }
+
+    private static void MetadataAndPersistence()
+    {
+        Check(CleanPresetBank.Name == "Clean" && CleanPresetBank.Presets.Count == 5,"Clean bank");
+        Check(CleanPresetBank.AccessibleName == "Banco Clean dedicado","Accessible bank name");
+        Check(FactoryPresetBank.Presets.Count == 37,"Factory count");
+        for (int i=0;i<32;i++) Check(J(FactoryPresetBank.Presets[i]) == J(BaselineAmpAccessible.Persistence.FactoryPresetBank.Presets[i]),$"Old preset {i+1} changed");
+        Check(J(ScenePreset.CreateFactoryDefaults()) == J(BaselineAmpAccessible.Models.ScenePreset.CreateFactoryDefaults()),"Initial scenes changed");
+        for(int i=0;i<5;i++)
+        {
+            var p=CleanPresetBank.Presets[i]; var s=p.Sound;
+            Check(p.Name == Names[i] && ReferenceEquals(p,FactoryPresetBank.Presets[32+i]),"Names/order");
+            Check(CleanPresetBank.Description(p).Length>15,"Description");
+            Check(s.Channel == AmpChannel.CleanTwin && s.Gain <= 2f,"Clean channel/gain");
+            Check(!p.NamEnabled && !s.Ts9Enabled && !s.Od1Enabled && !s.OverdriveEnabled && !s.FuzzEnabled && !s.BoosterEnabled,"Saturation enabled");
+            Check(!s.AccompanimentStored && !s.ExternalIrEnabled && s.ExternalIrPath is null,"Factory external dependencies");
+            Check(s.DelayEnabled == (i is 1 or 2 or 4),"Delay state");
+            Check(s.ReverbCharacter == new[]{ReverbCharacter.Spring,ReverbCharacter.Hall,ReverbCharacter.Plate,ReverbCharacter.Room,ReverbCharacter.Hall}[i],"Reverb choice");
+            foreach(var prop in typeof(ScenePreset).GetProperties().Where(p=>p.PropertyType==typeof(float)))
+            {
+                float v=(float)prop.GetValue(s)!; Check(float.IsFinite(v),$"Nonfinite {prop.Name}");
+                if(prop.Name.EndsWith("Percent")) Check(v>=0 && v<=100,$"Percent range {prop.Name}");
+            }
+            Check(s.Gain>=0 && s.Bass is >=0 and <=10 && s.Middle is >=0 and <=10 && s.Treble is >=0 and <=10 && s.Presence is >=0 and <=10,"EQ range");
+            Check(s.CompressorSustain is >=0 and <=3 && s.CompressorAttackMs is >=2 and <=80,"Compressor range");
+            Check(s.DelayTimeMs is >=1 and <=2000 && s.DelayFeedbackPercent<=35 && s.ReverbMixPercent<=30,"Wet range");
+            Check(CleanPresetBank.Find(JsonSerializer.Deserialize<ScenePreset>(J(s))!)?.Name==p.Name,"Identification after JSON restore");
+            var library=new UserPresetLibrary { Presets=new(){p}, LastSelectedIndex=0 };
+            PresetStore.Save(library); Check(J(PresetStore.Load())==J(library),"Preset file roundtrip");
+            var scenes=new SceneLibrary { Scenes=new(){s,s,s} };
+            SceneStore.Save(scenes); Check(J(SceneStore.Load())==J(scenes),"Scene file roundtrip");
+            var bank=new DualGuitarBankPreset {Name="My clean",Sound=s,MixPercent=61f,PanPercent=-35f,NamEnabled=false};
+            var dual=new DualGuitarSceneLibrary {Scenes=new(){new DualGuitarScenePreset {Name="Clean test",Guitar1=bank,Guitar2=bank with {PanPercent=40f,MixPercent=54f},MasterVolumePercent=73f}}};
+            DualGuitarSceneStore.Save(dual); Check(J(DualGuitarSceneStore.Load())==J(dual),"Dual scene file roundtrip");
+        }
+        var old=JsonSerializer.Deserialize<DualGuitarBankPreset>("{\"Name\":\"Old\",\"Sound\":{\"Gain\":2.5}}")!;
+        Check(old.PanPercent==0 && old.MixPercent==70 && old.Sound.Gain==2.5f,"Legacy defaults");
+        Console.WriteLine("PASS metadata: five names/order, parameter ranges, 32 previous presets/default scenes identical, real isolated file roundtrips, legacy defaults.");
+    }
+
+    private static void Fill(float[] input,int start,int count,int rate,int style,int pickup,float level,int activeFrames)
+    {
+        double[] notes={82.4069,123.4708,164.8138,207.6523,246.9417,329.6276};
+        for(int i=0;i<count;i++)
+        {
+            int n=start+i; double t=n/(double)rate;
+            if(n>=activeFrames){input[i]=0;continue;}
+            double v=0;
+            for(int k=0;k<notes.Length;k++)
+            {
+                if(style==3 && k!=2)continue;
+                double offset=style==1 ? k*.12 : style==2 ? k*.004 : 0;
+                double at=(t-offset)%(style==1?.9:style==2?.3:1.0);
+                if(t<offset||at<0)continue;
+                double env=Math.Min(1,at*500)*Math.Exp(-at*(style==3?1.5:style==2?5:2));
+                double phase=2*Math.PI*notes[k]*t;
+                double harmonics=pickup==0 ? Math.Sin(phase)+.22*Math.Sin(2*phase)+.09*Math.Sin(3*phase) : Math.Sin(phase)+.12*Math.Sin(2*phase)+.03*Math.Sin(3*phase);
+                v+=env*harmonics;
+            }
+            input[i]=(float)(level*v/(style==3?1.31:notes.Length*1.31));
+        }
+    }
+
+    private static void AudioRegression()
+    {
+        long samples=0;
+        foreach(int rate in new[]{44100,48000})
+        foreach(var preset in FactoryPresetBank.Presets.Take(32))
+        {
+            using var current=new AudioProcessor(rate);
+            using var baseline=new BaselineAmpAccessible.Dsp.AudioProcessor(rate);
+            var p=Sound(preset.Sound); current.SetParameters(p);
+            baseline.SetParameters(JsonSerializer.Deserialize<BaselineAmpAccessible.Models.DspParameters>(J(p))!);
+            var input=new float[128]; var a=new float[256]; var b=new float[256];
+            for(int n=0;n<rate;n+=128)
+            {
+                int count=Math.Min(128,rate-n); Fill(input,n,count,rate,0,0,.4f,rate/2);
+                current.ProcessMonoToStereo(input,a,count); baseline.ProcessMonoToStereo(input,b,count);
+                for(int i=0;i<count*2;i++){Check(a[i]==b[i],$"Old audio changed {preset.Name}");samples++;}
+            }
+        }
+        Console.WriteLine($"PASS regression: {samples} old-preset channel samples identical to 2.41.73, including Spring.");
+    }
+
+    private static void LevelsAndTransitions()
+    {
+        float maxPeak=0; double maxSpread=0; int cases=0;
+        foreach(int rate in new[]{44100,48000,96000})
+        foreach(int style in Enumerable.Range(0,4))
+        foreach(int pickup in new[]{0,1})
+        foreach(float level in new[]{.12f,.45f,.9f})
+        {
+            var rms=new List<double>(); var totalRms=new List<double>();
+            foreach(var preset in CleanPresetBank.Presets)
+            {
+                using var processor=new AudioProcessor(rate); processor.SetParameters(Sound(preset.Sound));
+                var input=new float[128]; var output=new float[256]; double active=0,total=0;
+                for(int n=0;n<rate*4;n+=128)
+                {
+                    int count=Math.Min(128,rate*4-n); Fill(input,n,count,rate,style,pickup,level,rate*2);
+                    processor.ProcessMonoToStereo(input,output,count);
+                    for(int i=0;i<count*2;i++)
+                    {
+                        float x=output[i]; Check(float.IsFinite(x)&&Math.Abs(x)<.95f,$"Clipping/nonfinite {preset.Name}");
+                        maxPeak=Math.Max(maxPeak,Math.Abs(x)); total+=x*x;
+                        if(n+i/2<rate*2)active+=x*x;
+                    }
+                }
+                Check(active>1e-8,"Silent Clean"); rms.Add(Math.Sqrt(active/(rate*4))); totalRms.Add(Math.Sqrt(total/(rate*8))); cases++;
+            }
+            double spread=20*Math.Log10(rms.Max()/rms.Min()); double tailSpread=20*Math.Log10(totalRms.Max()/totalRms.Min());
+            maxSpread=Math.Max(maxSpread,Math.Max(spread,tailSpread));
+            if(rate==48000 && pickup==0 && level==.45f) Console.WriteLine($"LEVEL style {style}: active RMS {string.Join(", ",rms.Select(x=>x.ToString("F6")))}; spread {spread:F3} dB; with tails {tailSpread:F3} dB");
+        }
+        Console.WriteLine($"AUDIO: {cases} Clean cases, max peak {maxPeak:F6}, max level spread {maxSpread:F3} dB.");
+        Check(maxSpread<=1.5,"Clean level spread exceeds 1.5 dB");
+        float maxStep=0;
+        foreach(var from in CleanPresetBank.Presets)
+        foreach(var to in CleanPresetBank.Presets)
+        {
+            using var p=new AudioProcessor(48000); p.SetParameters(Sound(from.Sound));
+            var input=new float[128];var output=new float[256];float previous=0;
+            for(int block=0;block<1500;block++)
+            {
+                if(block==750){p.RequestDelayReset();p.SetParameters(Sound(to.Sound) with {Revision=2});}
+                Fill(input,block*128,128,48000,0,0,.45f,48000*4);
+                p.ProcessMonoToStereo(input,output,128);
+                for(int i=0;i<256;i+=2){Check(float.IsFinite(output[i])&&Math.Abs(output[i])<.95f,"Transition output"); if(block>=749 && block<=751)maxStep=Math.Max(maxStep,Math.Abs(output[i]-previous));previous=output[i];}
+            }
+        }
+        Console.WriteLine($"TRANSITIONS: 25 pairs, maximum adjacent left-channel step near switch {maxStep:F6}.");
+        Check(maxStep<.2f,"Transition spike");
+        using var perf=new AudioProcessor(48000);perf.SetParameters(Sound(CleanPresetBank.Presets[4].Sound));
+        var inp=new float[128];var outp=new float[256];Fill(inp,2000,128,48000,0,1,.45f,48000);
+        for(int i=0;i<3000;i++)perf.ProcessMonoToStereo(inp,outp,128);
+        long bytes=GC.GetAllocatedBytesForCurrentThread(),maxTicks=0;int missed=0;
+        for(int i=0;i<10000;i++){long start=Stopwatch.GetTimestamp();perf.ProcessMonoToStereo(inp,outp,128);long ticks=Stopwatch.GetTimestamp()-start;maxTicks=Math.Max(maxTicks,ticks);if(ticks/(double)Stopwatch.Frequency>128.0/48000)missed++;}
+        bytes=GC.GetAllocatedBytesForCurrentThread()-bytes;
+        Console.WriteLine($"OFFLINE PERFORMANCE 48k/128: {bytes} allocated bytes; {missed}/10000 over 2.667ms; max {maxTicks*1000.0/Stopwatch.Frequency:F3}ms. Not ASIO certification.");
+        Check(bytes==0,"Per-block allocations");
+    }
+
+    private static string CanonicalScene(DualGuitarScenePreset scene)
+    {
+        var json=System.Text.Json.Nodes.JsonNode.Parse(J(scene))!;
+        foreach(string guitar in new[]{"Guitar1","Guitar2"})
+        {
+            var sound=json[guitar]!["Sound"]!.AsObject();
+            // These legacy fields are inactive in a guitar bank; the global scene owns accompaniment.
+            if(!sound["AccompanimentStored"]!.GetValue<bool>())
+                foreach(string key in sound.Select(p=>p.Key).Where(k=>k.StartsWith("Scene")).ToArray()) sound.Remove(key);
+        }
+        return json.ToJsonString();
+    }
+    private static string argsForDump() => Path.GetFullPath(Path.Combine(TestPaths.Root,"..",".."));
+    private static void InterfaceAndDual()
+    {
+        using var form=new MainForm();
+        try
+        {
+            var engine=Get<AudioEngine>(form,"_engine");
+            var factory=Get<ComboBox>(form,"_factoryPresetCombo");
+            var dualFactory=Get<ComboBox>(form,"_dualFactoryBankCombo");
+            Check(factory.Items.Count==37 && dualFactory.Items.Count==37,"UI factory items");
+            Get<NumericUpDown>(form,"_masterVolume").Value=73;
+            for(int i=0;i<5;i++)
+            {
+                factory.SelectedIndex=32+i;
+                var actual=Parameters(engine.Processor);
+                Check(actual.Channel==AmpChannel.CleanTwin && actual.Gain==1.5f,"UI clean channel/gain");
+                Check(actual.DelayEnabled==CleanPresetBank.Presets[i].Sound.DelayEnabled,"UI delay");
+                Check(actual.ReverbCharacter==CleanPresetBank.Presets[i].Sound.ReverbCharacter,"UI reverb");
+                Check(factory.AccessibleName==CleanPresetBank.AccessibleName && factory.AccessibleDescription==CleanPresetBank.AccessibleDescription,"UI accessibility");
+                Check(((string)Call(form,"BuildAudioDiagnosticReport")!).Contains($"Banco: Clean. Preset: {Names[i]}"),"Clean diagnostic");
+                Check(Get<NumericUpDown>(form,"_masterVolume").Value==73,"Master overwritten");
+            }
+            Get<CheckBox>(form,"_twoGuitarMode").Checked=true;
+            var guitar=Get<ComboBox>(form,"_dualEditGuitarCombo");
+            for(int target=0;target<2;target++)
+            {
+                guitar.SelectedIndex=target;
+                for(int i=0;i<5;i++)
+                {
+                    Call(form,"UpdateParameters");
+                    var other=target==0?engine.Processor:engine.Guitar1Processor;
+                    var before=Parameters(other) with {Revision=0};
+                    var saved=(DualGuitarBankPreset)Call(form,"CaptureDualGuitarBank",1-target,"Other",false)!;
+                    dualFactory.SelectedIndex=32+i;Call(form,"LoadSelectedDualFactoryBank");
+                    var after=Parameters(other) with {Revision=0};
+                    Check(J(before)==J(after),$"Other guitar parameters changed loading {Names[i]} into G{target+1}");
+                    var afterSaved=(DualGuitarBankPreset)Call(form,"CaptureDualGuitarBank",1-target,"Other",false)!;
+                    Check(J(saved)==J(afterSaved),"Other guitar bank changed");
+                    var own=target==0?engine.Guitar1Processor:engine.Processor;
+                    Check(Parameters(own).CleanBass==CleanPresetBank.Presets[i].Sound.CleanBass,"Own EQ not applied");
+                    string report=(string)Call(form,"BuildAudioDiagnosticReport")!;
+                    Check(report.Contains($"Guitarra {target+1}. Banco: Clean. Preset: {Names[i]}"),"Dual diagnostic");
+                    var scene=(DualGuitarScenePreset)Call(form,"CaptureDualGuitarScene","Saved Clean")!;
+                    var lib=new DualGuitarSceneLibrary{Scenes=new(){scene}};DualGuitarSceneStore.Save(lib);
+                    Check(J(DualGuitarSceneStore.Load())==J(lib),"UI dual persistence");
+                }
+            }
+            // Load Clean G2 while G1 still has an old preset, including non-default EQ.
+            guitar.SelectedIndex=1;dualFactory.SelectedIndex=0;Call(form,"LoadSelectedDualFactoryBank");
+            guitar.SelectedIndex=0;dualFactory.SelectedIndex=8;Call(form,"LoadSelectedDualFactoryBank");
+            guitar.SelectedIndex=1;Call(form,"UpdateParameters");
+            var oldG1=Parameters(engine.Guitar1Processor) with {Revision=0};
+            dualFactory.SelectedIndex=33;Call(form,"LoadSelectedDualFactoryBank");
+            var newG1=Parameters(engine.Guitar1Processor) with {Revision=0};
+            foreach(var prop in typeof(DspParameters).GetProperties()) if(J(prop.GetValue(oldG1))!=J(prop.GetValue(newG1))) Console.WriteLine($"G1 changed: {prop.Name}: {J(prop.GetValue(oldG1))} -> {J(prop.GetValue(newG1))}");
+            Check(J(oldG1)==J(newG1),"Old G1 changed loading Clean G2");
+
+            // Synthetic impulses belong only to the test fixture, never to the shipped bank.
+            string irA=Path.Combine(TestPaths.Root,"test-a.wav"), irB=Path.Combine(TestPaths.Root,"test-b.wav");
+            foreach(string path in new[]{irA,irB})
+            {
+                using var wav=new NAudio.Wave.WaveFileWriter(path,new NAudio.Wave.WaveFormat(48000,16,1));
+                var samples=new float[256];samples[0]=.5f;samples[35]=.08f;wav.WriteSamples(samples,0,samples.Length);
+            }
+            var irScene=CleanPresetBank.Presets[0].Sound with {ExternalIrEnabled=true,ExternalIrPath=irA,ExternalIrBEnabled=true,ExternalIrBPath=irB,IrMixPercent=31f,IrBPhaseInvert=true,IrLowCutHz=80f,IrHighCutHz=8000f};
+            Call(form,"ApplySceneImpulseResponse",irScene,false);
+            engine.Guitar1Processor.LoadImpulseResponse(irB);
+            typeof(MainForm).GetField("_guitar1LoadedIrPath",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(form,irB);
+            foreach(int target in new[]{0,1})
+            {
+                guitar.SelectedIndex=target;
+                foreach(int index in Enumerable.Range(32,5))
+                {
+                    dualFactory.SelectedIndex=index;Call(form,"LoadSelectedDualFactoryBank");
+                    Check(Get<string>(form,"_loadedIrPath")==irA && Get<string>(form,"_loadedIrPathB")==irB,"G2 IR path overwritten");
+                    Check(Get<string>(form,"_guitar1LoadedIrPath")==irB,"G1 IR path overwritten");
+                    Check(engine.Processor.HasExternalImpulse && engine.Guitar1Processor.HasExternalImpulse,"IR unloaded");
+                    Check(Get<NumericUpDown>(form,"_irMix").Value==31,"IR mix overwritten");
+                }
+            }
+            Get<NumericUpDown>(form,"_guitar1Pan").Value=-40;Get<NumericUpDown>(form,"_guitar2Pan").Value=35;
+            Get<NumericUpDown>(form,"_guitar1Mix").Value=61;Get<NumericUpDown>(form,"_guitar2Mix").Value=54;
+            Get<CheckBox>(form,"_drumsEnabled").Checked=true;Call(form,"UpdateParameters");
+            var savedScene=(DualGuitarScenePreset)Call(form,"CaptureDualGuitarScene","Restart Clean")!;
+            var sceneLibrary=Get<DualGuitarSceneLibrary>(form,"_dualGuitarSceneLibrary");sceneLibrary.Scenes=new(){savedScene};sceneLibrary.LastSelectedIndex=0;
+            DualGuitarSceneStore.Save(sceneLibrary);
+            using(var restarted=new MainForm())
+            {
+                try
+                {
+                    Call(restarted,"RefreshDualGuitarSceneList",0);
+                    Call(restarted,"LoadSelectedDualGuitarScene");
+                    var restored=(DualGuitarScenePreset)Call(restarted,"CaptureDualGuitarScene","Restart Clean")!;
+                    File.WriteAllText(Path.Combine(argsForDump(),"saved.json"),J(savedScene));
+                    File.WriteAllText(Path.Combine(argsForDump(),"restored.json"),J(restored));
+                    Check(CanonicalScene(savedScene)==CanonicalScene(restored),"Complete scene after restart differs");
+                    Check(((string)Call(restarted,"BuildAudioDiagnosticReport")!).Contains("Preset: Clean Ambient"),"Diagnostic lost after restart");
+                }
+                finally{Application.RemoveMessageFilter(restarted);}
+            }
+            Console.WriteLine("PASS UI: lists/accessibility, diagnostics, master, G1/G2 isolation including old G1, independent IR A/B preserved, full scene restart with mix/pan/accompaniment.");
+        }
+        finally {Application.RemoveMessageFilter(form);}
+    }
+}

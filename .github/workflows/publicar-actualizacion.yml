@@ -55,6 +55,11 @@ jobs:
         if: steps.existing.outputs.exists != 'true'
         run: dotnet restore GDMAmpAccessible.csproj
 
+      - name: Validar banco Clean y regresion de audio
+        if: steps.existing.outputs.exists != 'true' && steps.version.outputs.version == '2.41.74'
+        shell: pwsh
+        run: '& ''Installer\Tests\Validate-CleanBank.ps1'''
+
       - name: Publicar Windows x64 autocontenido
         if: steps.existing.outputs.exists != 'true'
         shell: pwsh

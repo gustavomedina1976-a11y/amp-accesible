@@ -4,7 +4,7 @@ namespace GDMAmpAccessible.Persistence;
 
 internal static class FactoryPresetBank
 {
-    public static IReadOnlyList<UserPreset> Presets { get; } = Create();
+    public static IReadOnlyList<UserPreset> Presets { get; } = Create().Concat(CleanPresetBank.Presets).ToArray();
 
     private static UserPreset P(string code, string name, ScenePreset sound) => new()
     {

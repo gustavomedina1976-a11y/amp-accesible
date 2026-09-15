@@ -923,7 +923,7 @@ public sealed class MainForm : Form, IMessageFilter
         _dualQuickNamCurrent.Text = "Sin modelo NAM cargado.";
         AddLabeledControl(table, "NAM rápido, actual:", _dualQuickNamCurrent);
 
-        ConfigureCombo(_dualFactoryBankCombo, "Banco de fábrica para la guitarra seleccionada", "Los treinta bancos de fábrica pueden cargarse sólo en la guitarra elegida. No modifican la otra guitarra ni se mezclan con los bancos personales.");
+        ConfigureCombo(_dualFactoryBankCombo, "Banco de fábrica para la guitarra seleccionada", $"Los {FactoryPresetBank.Presets.Count} bancos de fábrica pueden cargarse sólo en la guitarra elegida. No modifican la otra guitarra ni se mezclan con los bancos personales.");
         foreach (UserPreset factoryPreset in FactoryPresetBank.Presets) _dualFactoryBankCombo.Items.Add(factoryPreset.Name);
         if (_dualFactoryBankCombo.Items.Count > 0) _dualFactoryBankCombo.SelectedIndex = 0;
         AddLabeledControl(table, "Banco de fábrica para la guitarra seleccionada:", _dualFactoryBankCombo);
@@ -1127,7 +1127,7 @@ public sealed class MainForm : Form, IMessageFilter
         var table = CreateTwoColumnTable();
         group.Controls.Add(table);
 
-        ConfigureCombo(_factoryPresetCombo, "Banco de fábrica", "Treinta presets de fábrica de sólo lectura, listos para usar.");
+        ConfigureCombo(_factoryPresetCombo, "Banco de fábrica", $"{FactoryPresetBank.Presets.Count} presets de fábrica de sólo lectura, incluido el banco Clean: Clean Warm, Clean Worship, Clean Arpeggio, Clean Rhythm y Clean Ambient.");
         foreach (UserPreset factoryPreset in FactoryPresetBank.Presets) _factoryPresetCombo.Items.Add(factoryPreset.Name);
         if (_factoryPresetCombo.Items.Count > 0) _factoryPresetCombo.SelectedIndex = 0;
         AddLabeledControl(table, "Preset de &fábrica:", _factoryPresetCombo);
@@ -1163,7 +1163,7 @@ public sealed class MainForm : Form, IMessageFilter
         var info = new Label
         {
             AutoSize = true, MaximumSize = new Size(790, 0),
-            Text = "El banco de fábrica contiene 30 sonidos de sólo lectura. Puede cargarlos directamente o duplicarlos al banco de usuario para editarlos. Los presets de usuario son ilimitados y guardan canal, EQ, pedales, IR, acompañamiento, modelo NAM, ajustes NAM y el orden de la cadena previa.",
+            Text = $"El banco de fábrica contiene {FactoryPresetBank.Presets.Count} sonidos de sólo lectura. Banco Clean: Clean Warm, Clean Worship, Clean Arpeggio, Clean Rhythm y Clean Ambient, al final de la lista. Puede cargarlos directamente o duplicarlos al banco de usuario para editarlos. Los presets de usuario son ilimitados y guardan canal, EQ, pedales, IR, acompañamiento, modelo NAM, ajustes NAM y el orden de la cadena previa.",
             AccessibleName = "Contenido de los presets completos"
         };
         AddLabeledControl(table, "Información:", info);
@@ -3904,6 +3904,17 @@ public sealed class MainForm : Form, IMessageFilter
             if (!_loadingFactoryPreset && _factoryPresetCombo.SelectedIndex >= 0)
                 LoadSelectedFactoryPreset(announce: true);
         };
+        _dualFactoryBankCombo.SelectedIndexChanged += (_, _) =>
+        {
+            int index = _dualFactoryBankCombo.SelectedIndex;
+            if (index >= 0 && index < FactoryPresetBank.Presets.Count)
+            {
+                UserPreset selected = FactoryPresetBank.Presets[index];
+                UpdateCleanBankAccessibility(_dualFactoryBankCombo, selected);
+                _dualFactoryBankLoadButton.AccessibleDescription = CleanPresetBank.Contains(selected)
+                    ? CleanPresetBank.Description(selected) : "Carga el preset sólo en la guitarra seleccionada.";
+            }
+        };
         _loadFactoryPresetButton.Click += (_, _) => LoadSelectedFactoryPreset(announce: true);
         _duplicateFactoryPresetButton.Click += (_, _) => DuplicateSelectedFactoryPreset();
         _savePresetButton.Click += (_, _) => SaveCurrentPreset();
@@ -4243,17 +4254,27 @@ public sealed class MainForm : Form, IMessageFilter
         }
 
         UserPreset preset = FactoryPresetBank.Presets[index];
+        UpdateCleanBankAccessibility(_factoryPresetCombo, preset);
+        _loadFactoryPresetButton.AccessibleDescription = CleanPresetBank.Description(preset);
+        if (CleanPresetBank.Contains(preset) && _twoGuitarMode.Checked)
+        {
+            _dualFactoryBankCombo.SelectedIndex = index;
+            LoadSelectedDualFactoryBank();
+            return;
+        }
         _loadingFactoryPreset = true;
         try
         {
             // Aplicar el rig completo como una sola operación: sonido, cadena, NAM e IR.
             _preEffectOrder = UserPresetLibrary.NormalizeOrder(preset.PreEffectOrder);
-            ApplyPresetSound(preset.Sound);
+            ApplyPresetSound(CleanPresetBank.Contains(preset)
+                ? CleanPresetBank.PreserveCabinet(preset.Sound, CaptureCurrentScene(preset.Name))
+                : preset.Sound);
             PopulatePreChainList();
 
             _namEnabled.Checked = false;
             _namIncludesCabinet.Checked = false;
-            _engine.Processor.ClearNamModel();
+            if (!CleanPresetBank.Contains(preset)) _engine.Processor.ClearNamModel();
             UpdateDynamicEffectAccessibleNames();
             UpdateParameters();
         }
@@ -4267,8 +4288,19 @@ public sealed class MainForm : Form, IMessageFilter
             string code = index + 1 <= 99 ? $"F{index + 1:00}" : $"F{index + 1}";
             string ampName = _channelCombo.SelectedItem?.ToString() ?? "amplificador";
             string activeEffects = DescribeActiveFactoryEffects(preset.Sound);
-            SetStatus($"{code} {preset.Name} cargado. Amplificador {ampName}. {activeEffects}");
+            SetStatus(CleanPresetBank.Contains(preset)
+                ? $"Banco Clean. Preset {preset.Name}. {CleanPresetBank.Description(preset)}"
+                : $"{code} {preset.Name} cargado. Amplificador {ampName}. {activeEffects}");
         }
+    }
+
+    private static void UpdateCleanBankAccessibility(ComboBox combo, UserPreset preset)
+    {
+        bool clean = CleanPresetBank.Contains(preset);
+        combo.AccessibleName = clean ? CleanPresetBank.AccessibleName : "Banco de fábrica";
+        combo.AccessibleDescription = clean
+            ? CleanPresetBank.AccessibleDescription
+            : $"{FactoryPresetBank.Presets.Count} presets de fábrica de sólo lectura, listos para usar.";
     }
 
     private static string DescribeActiveFactoryEffects(ScenePreset scene)
@@ -4509,7 +4541,7 @@ public sealed class MainForm : Form, IMessageFilter
 
             DialogResult answer = MessageBox.Show(
                 this,
-                "La restauración reemplazará escenas, presets de usuario, bancos independientes y escenas completas de dos guitarras, preferencias, asignaciones MIDI y Banco NAM actuales por los de la copia seleccionada. Los 30 bancos de fábrica no se modifican. ¿Continuar?",
+                "La restauración reemplazará escenas, presets de usuario, bancos independientes y escenas completas de dos guitarras, preferencias, asignaciones MIDI y Banco NAM actuales por los de la copia seleccionada. Los bancos de fábrica no se modifican. ¿Continuar?",
                 "Restaurar copia de seguridad",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question);
@@ -5721,6 +5753,18 @@ public sealed class MainForm : Form, IMessageFilter
             return;
 
         ScenePreset captured = CaptureCurrentScene(guitarIndex == 0 ? "Efectos Guitarra 1" : "Efectos Guitarra 2");
+        if (guitarIndex == 0 && _guitar1EffectMemory is not null &&
+            (CleanPresetBank.IsCleanSound(_guitar1EffectMemory) || CleanPresetBank.IsCleanSound(_guitar2EffectMemory)))
+        {
+            captured = CleanPresetBank.PreserveEq(captured, _guitar1EffectMemory) with
+            {
+                Name = _guitar1EffectMemory.Name,
+                Channel = (AmpChannel)Math.Max(0, _guitar1AmpCombo.SelectedIndex),
+                Gain = (float)_guitar1Gain.Value, OutputPercent = (float)_guitar1Output.Value
+            };
+        }
+        if (guitarIndex == 1 && CleanPresetBank.IsCleanSound(_guitar2EffectMemory))
+            captured = captured with { Name = _guitar2EffectMemory!.Name };
         if (guitarIndex == 0) _guitar1EffectMemory = captured;
         else _guitar2EffectMemory = captured;
     }
@@ -5902,7 +5946,10 @@ public sealed class MainForm : Form, IMessageFilter
         UpdateDualGuitarStatus();
         UpdateParameters();
         string activeEffects = DescribeActiveFactoryEffects(preset.Sound);
-        SetStatus($"{guitarName}, {preset.Name} cargado como banco de fábrica independiente. {activeEffects} La otra guitarra permanece intacta.");
+        UpdateCleanBankAccessibility(_dualFactoryBankCombo, preset);
+        SetStatus(CleanPresetBank.Contains(preset)
+            ? $"{guitarName}. Banco Clean. Preset {preset.Name}. {CleanPresetBank.Description(preset)}"
+            : $"{guitarName}, {preset.Name} cargado como banco de fábrica independiente. {activeEffects} La otra guitarra permanece intacta.");
     }
 
     private void ApplyFactoryPresetToGuitar1(UserPreset preset)
@@ -5917,6 +5964,10 @@ public sealed class MainForm : Form, IMessageFilter
             ExternalIrBPath = null,
             AccompanimentStored = false
         };
+        bool clean = CleanPresetBank.Contains(preset);
+        if (clean)
+            sound = CleanPresetBank.PreserveCabinet(sound,
+                CaptureDualGuitarBank(0, preset.Name).Sound) with { Name = preset.Name };
 
         _guitar1AmpCombo.SelectedIndex = Math.Clamp((int)sound.Channel, 0, Math.Max(0, _guitar1AmpCombo.Items.Count - 1));
         SetNumeric(_guitar1Gain, sound.Gain);
@@ -5927,11 +5978,14 @@ public sealed class MainForm : Form, IMessageFilter
 
         // Los bancos de fábrica utilizan gabinete interno. El navegador de carpeta
         // permanece preparado, pero el IR externo de Guitarra 1 se desactiva.
-        _engine.Guitar1Processor.ClearImpulseResponse();
-        _guitar1LoadedIrPath = null;
-        _audioPreferences.Guitar1IrPath = string.Empty;
-        _guitar1IrPath.Text = "Guitarra 1: gabinete interno.";
-        _guitar1ClearIrButton.Enabled = false;
+        if (!clean)
+        {
+            _engine.Guitar1Processor.ClearImpulseResponse();
+            _guitar1LoadedIrPath = null;
+            _audioPreferences.Guitar1IrPath = string.Empty;
+            _guitar1IrPath.Text = "Guitarra 1: gabinete interno.";
+            _guitar1ClearIrButton.Enabled = false;
+        }
         // Los bancos de fábrica son sonidos de amplificadores internos. El NAM de
         // Guitarra 1 queda cargado como preparado, pero desactivado, para volver luego.
         _guitar1NamEnabled.Checked = false;
@@ -5946,6 +6000,21 @@ public sealed class MainForm : Form, IMessageFilter
             PreEffectOrder = UserPresetLibrary.NormalizeOrder(preset.PreEffectOrder).ToArray(),
             AccompanimentStored = false
         };
+        if (CleanPresetBank.Contains(preset))
+        {
+            var current = CaptureCurrentScene(preset.Name);
+            // Preserve G1's existing EQ before replacing the main rig's controls.
+            if (_guitar1EffectMemory is not null &&
+                !CleanPresetBank.IsCleanSound(_guitar1EffectMemory) &&
+                !CleanPresetBank.IsCleanSound(_guitar2EffectMemory))
+                _guitar1EffectMemory = CleanPresetBank.PreserveEq(_guitar1EffectMemory, current) with
+                {
+                    // The legacy G1 route uses these four fixed active-channel values.
+                    Bass = 5f, Middle = 5f, Treble = 5.5f, Presence = 5f
+                };
+            sound = CleanPresetBank.PreserveCabinet(sound, current) with { Name = preset.Name };
+            _guitar2EffectMemory = sound;
+        }
 
         // Guitarra 2 es el rig principal. Se aplica el mismo banco de fábrica que
         // en Alt+B, pero sin tocar Guitarra 1 y sin cargar acompañamientos.
@@ -5953,8 +6022,8 @@ public sealed class MainForm : Form, IMessageFilter
         ApplyPresetSound(sound);
         _namEnabled.Checked = false;
         _namIncludesCabinet.Checked = false;
-        _engine.Processor.ClearNamModel();
-        _guitar2EffectMemory = CaptureCurrentScene("Efectos Guitarra 2") with
+        if (!CleanPresetBank.Contains(preset)) _engine.Processor.ClearNamModel();
+        _guitar2EffectMemory = CaptureCurrentScene(CleanPresetBank.Contains(preset) ? preset.Name : "Efectos Guitarra 2") with
         {
             PreEffectOrder = _preEffectOrder.ToArray(),
             AccompanimentStored = false
@@ -6000,7 +6069,7 @@ public sealed class MainForm : Form, IMessageFilter
 
             string guitarName = guitarIndex == 0 ? "Guitarra 1" : "Guitarra 2";
             _dualFactoryBankCombo.AccessibleName = $"Bancos de fábrica para {guitarName}";
-            _dualFactoryBankCombo.AccessibleDescription = $"Treinta bancos de fábrica disponibles para {guitarName}. Cargar uno modifica sólo esa guitarra.";
+            _dualFactoryBankCombo.AccessibleDescription = $"{FactoryPresetBank.Presets.Count} bancos de fábrica disponibles para {guitarName}. Cargar uno modifica sólo esa guitarra.";
             _dualFactoryBankLoadButton.AccessibleName = $"Cargar banco de fábrica en {guitarName}";
             _dualBankCombo.AccessibleName = $"Bancos personales independientes de {guitarName}";
             _dualBankCombo.AccessibleDescription = banks.Count == 0
@@ -6038,7 +6107,7 @@ public sealed class MainForm : Form, IMessageFilter
             ScenePreset effects = _guitar1EffectMemory ?? CaptureCurrentScene("Efectos Guitarra 1");
             ScenePreset sound = effects with
             {
-                Name = name,
+                Name = CleanPresetBank.IsCleanSound(effects) ? effects.Name : name,
                 Channel = (AmpChannel)Math.Clamp(_guitar1AmpCombo.SelectedIndex, 0, 8),
                 Gain = (float)_guitar1Gain.Value,
                 OutputPercent = (float)_guitar1Output.Value,
@@ -6067,13 +6136,14 @@ public sealed class MainForm : Form, IMessageFilter
             };
         }
 
-        ScenePreset liveRig = CaptureCurrentScene(name);
+        ScenePreset liveRig = CaptureCurrentScene(CleanPresetBank.IsCleanSound(_guitar2EffectMemory)
+            ? _guitar2EffectMemory!.Name : name);
         ScenePreset guitar2Effects = _guitar2EffectMemory ?? liveRig;
         ScenePreset guitar2Sound = captureVisibleEffects
             ? liveRig with { AccompanimentStored = false }
             : guitar2Effects with
             {
-                Name = name,
+                Name = CleanPresetBank.IsCleanSound(guitar2Effects) ? guitar2Effects.Name : name,
                 Channel = liveRig.Channel,
                 Gain = liveRig.Gain,
                 Bass = liveRig.Bass,
@@ -6198,7 +6268,7 @@ public sealed class MainForm : Form, IMessageFilter
         _guitar1Mute.Checked = bank.Muted;
         _guitar1ProcessingEnabled.Checked = bank.ProcessingEnabled;
         _guitar1UseRigEffects.Checked = bank.EffectsEnabled;
-        _guitar1EffectMemory = sound with { Name = "Efectos Guitarra 1" };
+        _guitar1EffectMemory = sound with { Name = CleanPresetBank.IsCleanSound(sound) ? sound.Name : "Efectos Guitarra 1" };
         LoadDualEffectMemoryIntoControls(_guitar1EffectMemory);
 
         string notice = string.Empty;
@@ -6270,7 +6340,7 @@ public sealed class MainForm : Form, IMessageFilter
         ScenePreset sound = bank.Sound ?? new ScenePreset();
         // La memoria se actualiza antes de tocar los controles para que el callback
         // nunca reciba un bloque con amplificador nuevo y efectos viejos.
-        _guitar2EffectMemory = sound with { Name = "Efectos Guitarra 2" };
+        _guitar2EffectMemory = sound with { Name = CleanPresetBank.IsCleanSound(sound) ? sound.Name : "Efectos Guitarra 2" };
         ApplyPresetSound(sound);
         SetNumeric(_guitar2Mix, bank.MixPercent);
         SetNumeric(_guitar2Pan, bank.PanPercent);
@@ -6971,7 +7041,7 @@ public sealed class MainForm : Form, IMessageFilter
         string editing = _dualEditGuitarCombo.SelectedIndex == 1 ? "Guitarra 2" : "Guitarra 1";
         string g1Pan = FormatPanForSpeech(_guitar1Pan.Value);
         string g2Pan = FormatPanForSpeech(_guitar2Pan.Value);
-        string text = $"Modo Dos Guitarras {state}. Editando efectos y bancos de {editing}. Bancos personales: Guitarra 1 {_dualGuitarBankLibrary.Guitar1Banks.Count}, Guitarra 2 {_dualGuitarBankLibrary.Guitar2Banks.Count}; 30 bancos de fábrica disponibles para cada guitarra; escenas completas {_dualGuitarSceneLibrary.Scenes.Count}. Guitarra 1: {g1Processing}, {g1Effects}, {g1Nam}, {amp}, ganancia {_guitar1Gain.Value:0.0}, volumen DSP {_guitar1Output.Value:0} %, mezcla {_guitar1Mix.Value:0} %, paneo {g1Pan}, {g1Mute}. Guitarra 2: efectos independientes, rig principal/NAM, mezcla {_guitar2Mix.Value:0} %, paneo {g2Pan}, {g2Mute}.";
+        string text = $"Modo Dos Guitarras {state}. Editando efectos y bancos de {editing}. Bancos personales: Guitarra 1 {_dualGuitarBankLibrary.Guitar1Banks.Count}, Guitarra 2 {_dualGuitarBankLibrary.Guitar2Banks.Count}; {FactoryPresetBank.Presets.Count} bancos de fábrica disponibles para cada guitarra; escenas completas {_dualGuitarSceneLibrary.Scenes.Count}. Guitarra 1: {g1Processing}, {g1Effects}, {g1Nam}, {amp}, ganancia {_guitar1Gain.Value:0.0}, volumen DSP {_guitar1Output.Value:0} %, mezcla {_guitar1Mix.Value:0} %, paneo {g1Pan}, {g1Mute}. Guitarra 2: efectos independientes, rig principal/NAM, mezcla {_guitar2Mix.Value:0} %, paneo {g2Pan}, {g2Mute}.";
         _dualGuitarStatusLabel.Text = text;
         _dualGuitarStatusLabel.AccessibleName = text;
     }
@@ -7558,6 +7628,21 @@ public sealed class MainForm : Form, IMessageFilter
 
         text.AppendLine(AppInfo.DiagnosticTitle);
         text.AppendLine($"Identificación de compilación: {AppInfo.Version}; {AppInfo.BuildName}");
+        if (_twoGuitarMode.Checked)
+        {
+            for (int guitar = 0; guitar < 2; guitar++)
+            {
+                var bank = CaptureDualGuitarBank(guitar, "Diagnóstico", captureVisibleEffects: false);
+                var clean = bank.NamEnabled ? null : CleanPresetBank.Find(bank.Sound);
+                if (clean is not null)
+                    text.AppendLine($"Guitarra {guitar + 1}. Banco: Clean. Preset: {clean.Name}.");
+            }
+        }
+        else if (!_namEnabled.Checked)
+        {
+            var clean = CleanPresetBank.Find(CaptureCurrentScene("Diagnóstico"));
+            if (clean is not null) text.AppendLine($"Banco: Clean. Preset: {clean.Name}.");
+        }
         text.AppendLine($"Estado general: {GetAudioDiagnosticHealth()}");
         text.AppendLine($"Audio: {(_engine.IsRunning ? "activo" : _engine.HasActiveSession ? "sesión abierta" : "detenido")}");
         text.AppendLine($"Volumen master de Amp Accessible: {_masterVolume.Value:0} %; salida final medida después del master {FormatPeakDb(_engine.MasterOutputPeak)}; las grabaciones internas se conservan antes del master");
@@ -9619,6 +9704,9 @@ public sealed class MainForm : Form, IMessageFilter
 
             if (_dualEffectMemoriesInitialized && _guitar1EffectMemory is not null)
                 guitar1Parameters = ApplyEffectMemoryToParameters(guitar1Parameters, _guitar1EffectMemory);
+            if (_guitar1EffectMemory is not null &&
+                (CleanPresetBank.IsCleanSound(_guitar1EffectMemory) || CleanPresetBank.IsCleanSound(_guitar2EffectMemory)))
+                guitar1Parameters = CleanPresetBank.ApplyEq(guitar1Parameters, _guitar1EffectMemory);
         }
         else
         {
