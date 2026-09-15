@@ -1,0 +1,348 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using GDMAmpAccessible.Dsp;
+using GDMAmpAccessible.Models;
+using GDMAmpAccessible.Audio;
+using NAudio.Wave;
+using NAudio.Wave.Asio;
+using B = BaselineAmpAccessible.Dsp;
+using BM = BaselineAmpAccessible.Models;
+
+try
+{
+CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+string work = args[0];
+void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
+float Signal(int i, int rate) => (float)(.23 * Math.Sin(2 * Math.PI * 110 * i / rate)
+    + .08 * Math.Sin(2 * Math.PI * 277.18 * i / rate));
+void Safe(float l, float r, float limit = 2f) => Check(float.IsFinite(l) && float.IsFinite(r)
+    && Math.Abs(l) <= limit && Math.Abs(r) <= limit, "Nonfinite or out-of-range output");
+
+long identical = 0;
+foreach (int rate in new[] { 16000, 44100, 48000, 96000 })
+foreach (int setting in Enumerable.Range(0, 12))
+foreach (ReverbCharacter type in Enum.GetValues<ReverbCharacter>().Skip(1))
+{
+    var a = new ReverbEffect(rate); var b = new B.ReverbEffect(rate);
+    float decay = setting % 3 * 50, tone = setting / 3 % 3 * 50;
+    float damping = setting % 2 * 100, diffusion = setting % 4 * 33.33f;
+    a.Configure(true, type, 85, decay, tone, setting * 9, damping, diffusion);
+    b.Configure(true, (BM.ReverbCharacter)type, 85, decay, tone, setting * 9, damping, diffusion);
+    var rng = new Random(100 + setting);
+    for (int i = 0; i < rate; i++)
+    {
+        float x = i < rate / 2 ? (float)(rng.NextDouble() - .5) : 0;
+        a.Process(x, x * -.3f, out float l, out float r);
+        b.Process(x, x * -.3f, out float bl, out float br);
+        Check(l == bl && r == br, $"Non-Spring regression: {type}/{rate}/{setting}");
+        identical += 2;
+        if (i == rate / 3) { a.Reset(); b.Reset(); }
+    }
+}
+Console.WriteLine($"Other six reverbs: {identical} identical channel samples (48 configurations each, resets included).");
+
+// Wet-only impulse measurements, with fade-in completed before excitation.
+float[] Impulse(ReverbCharacter type, int decay, float amplitude = .5f)
+{
+    var a = new ReverbEffect(48000); a.Configure(true, type, 85, decay, 55, 18, 45, 60);
+    for (int i = 0; i < 4800; i++) a.Process(0, 0, out _, out _);
+    var result = new float[48000 * 4];
+    for (int i = 0; i < result.Length; i++)
+    {
+        float x = i == 0 ? amplitude : 0;
+        a.Process(x, x, out float l, out _); result[i] = l - x;
+    }
+    return result;
+}
+double Energy(float[] x, double start, double end) => x.Skip((int)(start * 48000))
+    .Take((int)((end - start) * 48000)).Sum(v => (double)v * v);
+double Tail(float[] x, double threshold)
+{
+    var e = new double[x.Length]; double sum = 0;
+    for (int i = x.Length - 1; i >= 0; i--) { sum += (double)x[i] * x[i]; e[i] = sum; }
+    return Array.FindIndex(e, v => v < sum * threshold) / 48000.0;
+}
+double Irregularity(float[] x)
+{
+    // Absence of periodic repetitions in the first 250 ms, measured by autocorrelation.
+    double largest = 0;
+    for (int lag = 384; lag <= 2400; lag += 8)
+    {
+        double cross = 0, e1 = 0, e2 = 0;
+        for (int i = 1920; i < 12000; i++)
+        { double a = x[i], b = x[i + lag]; cross += a * b; e1 += a * a; e2 += b * b; }
+        largest = Math.Max(largest, Math.Abs(cross) / Math.Sqrt(Math.Max(1e-30, e1 * e2)));
+    }
+    return 1 - largest;
+}
+foreach (int decay in new[] { 0, 48, 100 })
+{
+    var spring = Impulse(ReverbCharacter.Spring, decay);
+    var plate = Impulse(ReverbCharacter.Plate, decay);
+    var room = Impulse(ReverbCharacter.Room, decay);
+    var hall = Impulse(ReverbCharacter.Hall, decay);
+    double onsetMs = Array.FindIndex(spring, v => Math.Abs(v) > .00001) / 48.0;
+    double earlyRatio = Energy(spring, .018, .045) / Energy(plate, .018, .045);
+    double st = Tail(spring, 1e-6), ht = Tail(hall, 1e-6);
+    double si = Irregularity(spring), ri = Irregularity(room);
+    Console.WriteLine($"A/B decay={decay}: onset={onsetMs:F2}ms; early Spring/Plate={10 * Math.Log10(earlyRatio):F2}dB; T60 Spring={st:F3}s Hall={ht:F3}s; irregularity Spring={si:F4} Room={ri:F4}.");
+    Check(onsetMs >= 18 && onsetMs <= 45, "Initial bounce outside 18-45 ms");
+    Check(earlyRatio > 1, "Spring early bounce not stronger than Plate");
+    Check(st < ht, "Spring tail not shorter than Hall");
+    Check(si > ri, "Spring repetitions not more irregular than Room");
+}
+
+float peak = 0; double maxDc = 0;
+foreach (int rate in new[] { 16000, 44100, 48000, 96000 })
+foreach (int cfg in Enumerable.Range(0, 16))
+{
+    var a = new ReverbEffect(rate);
+    a.Configure(true, ReverbCharacter.Spring, 85, cfg % 2 * 100, cfg / 2 % 2 * 100,
+        cfg % 3 * 60, cfg / 4 % 2 * 100, cfg / 8 * 100);
+    double dc = 0;
+    for (int i = 0; i < rate * 3; i++)
+    {
+        float x = i < rate ? Signal(i, rate) * (i % (rate / 4) < rate / 8 ? 1.7f : .12f) : .15f;
+        a.Process(x, -x * .63f, out float l, out float r); Safe(l, r, 1);
+        peak = Math.Max(peak, Math.Max(Math.Abs(l), Math.Abs(r)));
+        if (i >= rate * 2) dc += (l - x) + (r + x * .63f);
+    }
+    maxDc = Math.Max(maxDc, Math.Abs(dc / rate / 2));
+    a.Configure(false, ReverbCharacter.Spring, 85, 50, 50, 18, 50, 50);
+    a.Process(.1f, -.2f, out float dl, out float dr); Check(dl == .1f && dr == -.2f, "Bypass changed");
+    a.Configure(true, ReverbCharacter.Spring, 0, 50, 50, 18, 50, 50);
+    a.Process(.1f, -.2f, out dl, out dr); Check(dl == .1f && dr == -.2f, "Zero mix changed");
+}
+Check(maxDc < .0001, "Significant residual DC");
+Console.WriteLine($"Spring safety: 64 configurations; peak={peak:F6}; maximum wet DC={maxDc:E3}; bypass/zero mix exact.");
+
+// Transition state and the output waveform are both checked; unchanged dry is always present.
+float transitionStep = 0; long transitionIdentical = 0;
+foreach (var from in Enum.GetValues<ReverbCharacter>())
+foreach (var to in Enum.GetValues<ReverbCharacter>())
+{
+    if (from == to) continue;
+    var a = new ReverbEffect(48000); var b = new B.ReverbEffect(48000);
+    a.Configure(true, from, 85, 70, 55, 18, 45, 60); b.Configure(true, (BM.ReverbCharacter)from, 85, 70, 55, 18, 45, 60);
+    float last = 0;
+    for (int i = 0; i < 24000; i++)
+    {
+        if (i == 12000) { a.Configure(true, to, 85, 70, 55, 18, 45, 60); b.Configure(true, (BM.ReverbCharacter)to, 85, 70, 55, 18, 45, 60); }
+        float x = Signal(i, 48000);
+        a.Process(x, x, out float l, out float r); b.Process(x, x, out float bl, out float br); Safe(l, r);
+        if (i >= 12000 && i < 16000) transitionStep = Math.Max(transitionStep, Math.Abs(l - last));
+        if (to != ReverbCharacter.Spring && i > 16000)
+        { Check(l == bl && r == br, "Contaminated target after Spring/type change"); transitionIdentical += 2; }
+        if (i == 13600)
+            Check(typeof(ReverbEffect).GetField("_transitionStage", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(a)!.ToString() == "None", "Transition longer than 34 ms");
+        last = l;
+    }
+}
+Check(transitionStep < .10f, "Extreme transition discontinuity");
+Console.WriteLine($"42 transitions: max sample step={transitionStep:F6}; completion <34ms; {transitionIdentical} identical target samples after fade/reset.");
+
+// Dynamics: compare normalized early response to strong and soft plucked chords.
+double PluckResponse(float amplitude, bool soft)
+{
+    var a = new ReverbEffect(48000); a.Configure(true, ReverbCharacter.Spring, 85, 48, 55, 18, 45, 60);
+    double energy = 0;
+    for (int i = -4800; i < 24000; i++)
+    {
+        float x = i < 0 ? 0 : Signal(i, 48000) * amplitude * MathF.Exp(-i / 5500f)
+            * (soft ? Math.Min(1, i / 2400f) : Math.Min(1, i / 24f));
+        a.Process(x, x, out float l, out _);
+        if (i >= 864 && i < 4800) energy += (l - x) * (l - x);
+    }
+    return energy / (amplitude * amplitude);
+}
+double strong = PluckResponse(1.7f, false), gentle = PluckResponse(.2f, true);
+Check(strong > gentle, "No enhanced attack response");
+Console.WriteLine($"Dynamics: normalized early energy strong-pick/soft-onset={10 * Math.Log10(strong / gentle):F2}dB.");
+
+// Compare the full unchanged DSP chain with every supported effect independently enabled.
+var effects = new[] { "DelayEnabled", "ChorusEnabled", "AnalogChorusEnabled", "PhaserEnabled", "FlangerEnabled",
+    "AutoWahEnabled", "OverdriveEnabled", "Ts9Enabled", "Od1Enabled", "FuzzEnabled", "Eq5Enabled",
+    "CompressorEnabled", "BoosterEnabled", "RotaryEnabled", "NamEnabled" };
+long chainSamples = 0;
+foreach (string effect in effects)
+{
+    using var a = new AudioProcessor(48000); using var b = new B.AudioProcessor(48000);
+    var pa = new DspParameters { ReverbEnabled = false, GateEnabled = false, Revision = 1 };
+    var pb = new BM.DspParameters { ReverbEnabled = false, GateEnabled = false, Revision = 1 };
+    typeof(DspParameters).GetProperty(effect)!.SetValue(pa, true); typeof(BM.DspParameters).GetProperty(effect)!.SetValue(pb, true);
+    a.SetParameters(pa); b.SetParameters(pb);
+    var input = new float[128]; var output = new float[256]; var baseline = new float[256];
+    for (int block = 0; block < 750; block++)
+    {
+        for (int i = 0; i < 128; i++) input[i] = Signal(block * 128 + i, 48000);
+        a.ProcessMonoToStereo(input, output, 128); b.ProcessMonoToStereo(input, baseline, 128);
+        Check(output.AsSpan().SequenceEqual(baseline), "Effect regression: " + effect); chainSamples += 256;
+    }
+}
+var ir = new float[256]; ir[0] = .7f; ir[17] = -.13f; ir[43] = .08f;
+var ca = new FirConvolver(ir); var cb = new B.FirConvolver(ir);
+for (int i = 0; i < 96000; i++) Check(ca.Process(Signal(i,48000)) == cb.Process(Signal(i,48000)), "IR changed");
+Console.WriteLine($"Effects: {chainSamples} identical chain samples across 15 effects; IR 96000 identical samples. NAM tested without a native model (source hash also checked).");
+
+long music = 0;
+foreach (int sound in Enumerable.Range(0, 6))
+foreach (int pattern in Enumerable.Range(0, 6))
+foreach (int line in Enumerable.Range(0, 5))
+{
+    var a = new PianoAccompanimentGenerator(48000); var b = new B.PianoAccompanimentGenerator(48000);
+    var ba = new BassAccompanimentGenerator(48000); var bb = new B.BassAccompanimentGenerator(48000);
+    var da = new DrumMachineGenerator(48000); var db = new B.DrumMachineGenerator(48000);
+    a.Configure(true, 240, 4, pattern, 35, (sound * 4 + line) % 24, sound, line, pattern);
+    b.Configure(true, 240, 4, pattern, 35, (sound * 4 + line) % 24, sound, line, pattern);
+    ba.Configure(true, 240, pattern, 50, line, sound % 2 == 0, line); bb.Configure(true, 240, pattern, 50, line, sound % 2 == 0, line);
+    da.Configure(true, 240, pattern, 50); db.Configure(true, 240, pattern, 50);
+    for (int i = 0; i < 48000 * 4; i++)
+    {
+        a.ProcessStereo(out float l, out float r); b.ProcessStereo(out float bl, out float br);
+        Check(l == bl && r == br && ba.Process(a) == bb.Process(b) && da.Process() == db.Process(), "Accompaniment regression"); music += 4;
+    }
+}
+Console.WriteLine($"Accompaniment: {music} identical samples in 180 cases (all bass modes, piano/organ sounds, drum patterns; four bars at 240 BPM).");
+
+// Separate instances and mix gain: interleaving G1 must never alter G2's state.
+{
+    var g1 = new ReverbEffect(48000); var g2 = new ReverbEffect(48000); var reference = new B.ReverbEffect(48000);
+    g1.Configure(true, ReverbCharacter.Spring, 85, 100, 55, 18, 45, 60);
+    g2.Configure(true, ReverbCharacter.Plate, 40, 48, 55, 18, 45, 60);
+    reference.Configure(true, BM.ReverbCharacter.Plate, 40, 48, 55, 18, 45, 60);
+    for (int i = 0; i < 240000; i++)
+    {
+        if (i % 24000 == 0) g1.Reset();
+        g1.Process(Signal(i, 48000), 0, out _, out _);
+        float x = Signal(i + 173, 48000);
+        g2.Process(x, x, out float l, out float r); reference.Process(x, x, out float bl, out float br);
+        Check(l == bl && r == br, "Guitar reverb states leaked");
+    }
+    var low = new ReverbEffect(48000); var high = new ReverbEffect(48000);
+    low.Configure(true, ReverbCharacter.Spring, 10, 48, 55, 18, 45, 60);
+    high.Configure(true, ReverbCharacter.Spring, 80, 48, 55, 18, 45, 60);
+    for (int i = 0; i < 96000; i++)
+    {
+        float x = Signal(i, 48000);
+        low.Process(x, -x * .2f, out float l, out _); high.Process(x, -x * .2f, out float h, out _);
+        Check(Math.Abs((l - x) * 8 - (h - x)) < 3e-7, "Mix control is not proportional");
+    }
+    Console.WriteLine("G1 Spring/G2 Plate: 480000 identical G2 samples with interleaved G1 resets; wet gain proportional at mix 10/80, dry unchanged.");
+}
+
+// Sustained clean notes must not keep retriggering the attack-specific phase variation.
+{
+    var a = new ReverbEffect(48000); a.Configure(true, ReverbCharacter.Spring, 40, 48, 55, 18, 45, 60);
+    var tank = typeof(ReverbEffect).GetField("_springTankLeft", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(a)!;
+    var strikeField = tank.GetType().GetField("_strike", BindingFlags.Instance | BindingFlags.NonPublic)!;
+    uint previous = 0; int sustainStrikes = 0;
+    for (int i = 0; i < 96000; i++)
+    {
+        float x = .4f * MathF.Sin(i * 2 * MathF.PI * 110 / 48000);
+        a.Process(x, x, out _, out _);
+        if (i % 128 == 0) { uint strike = (uint)strikeField.GetValue(tank)!; if (i > 48000 && strike != previous) sustainStrikes++; previous = strike; }
+    }
+    Check(sustainStrikes == 0, "Boing retriggered continuously on sustain");
+    Console.WriteLine("Sustained 110Hz clean note: zero boing retriggers after first second.");
+}
+
+// Recorder capture and looper DSP regression without writing user recordings.
+{
+    var a = new PracticeRecorder(16000, 2); var b = new BaselineAmpAccessible.Audio.PracticeRecorder(16000, 2);
+    foreach (object recorder in new object[] { a, b })
+    {
+        var type = recorder.GetType();
+        type.GetField("_active", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(recorder, 1);
+        type.GetField("_maxSamples", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(recorder, 32000);
+    }
+    var capture = new float[256]; var output = new float[256]; var baseline = new float[256];
+    var la = new PracticeLooper(16000, 2); var lb = new BaselineAmpAccessible.Audio.PracticeLooper(16000, 2);
+    la.StartFirstPass(); lb.StartFirstPass();
+    for (int block = 0; block < 125; block++)
+    {
+        for (int i = 0; i < 256; i++) capture[i] = Signal(block * 256 + i, 32000);
+        a.Capture(capture, 128); b.Capture(capture, 128);
+        la.Process(capture, output, null, 128); lb.Process(capture, baseline, null, 128);
+    }
+    var pcmA = (short[])typeof(PracticeRecorder).GetField("_buffer", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(a)!;
+    var pcmB = (short[])typeof(BaselineAmpAccessible.Audio.PracticeRecorder).GetField("_buffer", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(b)!;
+    Check(a.RecordedSamples == 32000 && b.RecordedSamples == 32000 && pcmA.AsSpan(0, 32000).SequenceEqual(pcmB.AsSpan(0, 32000)), "Recorder PCM changed");
+    Check(la.FinishFirstPassAndPlay() && lb.FinishFirstPassAndPlay(), "Looper first pass failed");
+    for (int block = 0; block < 500; block++)
+    {
+        if (block == 125) { la.ToggleOverdub(); lb.ToggleOverdub(); }
+        if (block == 250) { la.ToggleOverdub(); lb.ToggleOverdub(); la.UndoLastOverdub(); lb.UndoLastOverdub(); }
+        Array.Clear(output); Array.Clear(baseline);
+        la.Process(capture, output, null, 128); lb.Process(capture, baseline, null, 128);
+        Check(output.AsSpan().SequenceEqual(baseline), "Looper playback/overdub/undo changed");
+    }
+    Console.WriteLine("Recorder: 32000 identical captured PCM16 samples; looper: 128000 identical playback/overdub/undo samples.");
+}
+
+// Real AudioEngine callback, fed by preallocated synthetic ASIO buffers, without a driver.
+using (var engine = new AudioEngine())
+{
+    foreach (string name in new[] { "_captureInput", "_voiceInput", "_guitar1Input", "_guitar1Output", "_guitar2Output", "_guitar1LoopCapture", "_guitar2LoopCapture", "_processedOutput", "_loopCaptureOutput", "_meetOutput", "_meetEndpointOutput" })
+        typeof(AudioEngine).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(engine, new float[256]);
+    typeof(AudioEngine).GetField("_meetBytes", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(engine, new byte[1024]);
+    engine.ConfigureTwoGuitarMode(true, true, 65, -60, false, 65, 60, false);
+    engine.Guitar1Processor.SetParameters(new DspParameters { Revision = 1, ReverbCharacter = ReverbCharacter.Spring });
+    engine.Processor.SetParameters(new DspParameters { Revision = 1, ReverbCharacter = ReverbCharacter.Plate });
+    engine.ConfigureDualAccompaniment(new DspParameters { Revision = 1, DrumsEnabled = true, BackingBassEnabled = true, PianoEnabled = true, BackingBassLine = 4 });
+    var callback = typeof(AudioEngine).GetMethod("OnAudioAvailable", BindingFlags.Instance | BindingFlags.NonPublic)!.CreateDelegate<Action<object?, AsioAudioAvailableEventArgs>>(engine);
+    var pins = new GCHandle[4]; var buffers = new float[4][];
+    try
+    {
+        for (int i = 0; i < 4; i++) { buffers[i] = new float[128]; pins[i] = GCHandle.Alloc(buffers[i], GCHandleType.Pinned); }
+        var ev = new AsioAudioAvailableEventArgs(new[] { pins[0].AddrOfPinnedObject(), pins[1].AddrOfPinnedObject() }, new[] { pins[2].AddrOfPinnedObject(), pins[3].AddrOfPinnedObject() }, 128, AsioSampleType.Float32LSB);
+        for (int i = 0; i < 128; i++) { buffers[0][i] = Signal(i, 48000); buffers[1][i] = Signal(i + 73, 48000); }
+        for (int i = 0; i < 3000; i++) callback(null, ev);
+        long before = GC.GetAllocatedBytesForCurrentThread(); long sum = 0, max = 0; int late = 0;
+        for (int i = 0; i < 5000; i++)
+        {
+            long start = Stopwatch.GetTimestamp(); callback(null, ev); long ticks = Stopwatch.GetTimestamp() - start;
+            sum += ticks; max = Math.Max(max, ticks); if (ticks > Stopwatch.Frequency * 128.0 / 48000) late++;
+            for (int j = 0; j < 128; j++) Safe(buffers[2][j], buffers[3][j], 1);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        foreach (string field in new[] { "_bufferErrorCount", "_inputReadErrorCount", "_dspErrorCount", "_outputWriteErrorCount" })
+            Check((int)typeof(AudioEngine).GetField(field, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(engine)! == 0, "Callback error: " + field);
+        Check(allocated == 0, "Callback allocation");
+        Console.WriteLine($"Dual actual callback offline 48k/128, Spring+Plate+band: 5000 blocks; mean={sum * 1e6 / Stopwatch.Frequency / 5000:F2}us max={max * 1e6 / Stopwatch.Frequency:F2}us; deadlines exceeded={late}; allocated={allocated}; input/DSP/output/buffer errors=0.");
+    }
+    finally { foreach (var pin in pins) if (pin.IsAllocated) pin.Free(); }
+}
+
+foreach (bool baseline in new[] { true, false })
+{
+    var a = new ReverbEffect(48000); var b = new B.ReverbEffect(48000);
+    a.Configure(true, ReverbCharacter.Spring, 85, 100, 55, 18, 45, 60); b.Configure(true, BM.ReverbCharacter.Spring, 85, 100, 55, 18, 45, 60);
+    for (int i = 0; i < 480000; i++) { a.Process(.05f, -.03f, out _, out _); b.Process(.05f, -.03f, out _, out _); }
+    long before = GC.GetAllocatedBytesForCurrentThread(), sum = 0, max = 0; int late = 0;
+    for (int block = 0; block < 10000; block++)
+    {
+        long start = Stopwatch.GetTimestamp();
+        for (int i = 0; i < 128; i++) { if (baseline) b.Process(.05f, -.03f, out _, out _); else a.Process(.05f, -.03f, out _, out _); }
+        long ticks = Stopwatch.GetTimestamp() - start; sum += ticks; max = Math.Max(max, ticks); if (ticks > Stopwatch.Frequency * 128.0 / 48000) late++;
+    }
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before; Check(allocated == 0, "Reverb allocation");
+    Console.WriteLine($"Spring {(baseline ? "base" : "new")} 48k/128: mean={sum * 1e6 / Stopwatch.Frequency / 10000:F2}us max={max * 1e6 / Stopwatch.Frequency:F2}us; deadlines={late}; allocated={allocated}.");
+}
+
+// Export deterministic A/B material for perceptual review; this is synthetic guitar, not a listening certification.
+foreach (var type in new[] { ReverbCharacter.Spring, ReverbCharacter.Plate, ReverbCharacter.Room, ReverbCharacter.Hall })
+{
+    var a = new ReverbEffect(48000); a.Configure(true, type, 40, 48, 55, 18, 45, 60);
+    using var writer = new WaveFileWriter(Path.Combine(work, $"AB-{type}.wav"), WaveFormat.CreateIeeeFloatWaveFormat(48000, 2));
+    for (int i = 0; i < 48000 * 8; i++)
+    {
+        int age = i % 48000; float x = i < 48000 * 5 ? Signal(i, 48000) * MathF.Exp(-age / 5000f) * Math.Min(1, age / 24f) : 0;
+        a.Process(x, x, out float l, out float r); writer.WriteSample(l); writer.WriteSample(r);
+    }
+}
+Console.WriteLine("PASS. Hardware Focusrite ASIO, interactive JAWS, and perceptual listening remain separate checks.");
+
+}
+catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode = 1; }

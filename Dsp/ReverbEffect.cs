@@ -68,26 +68,8 @@ internal sealed class ReverbEffect
     private float _previousWetLeft;
     private float _previousWetRight;
     private float _shimmerDc;
-    private float _springLeft1;
-    private float _springLeft2;
-    private float _springRight1;
-    private float _springRight2;
-
-    // 2.41.35: el tanque Spring responde al ataque de la cuerda sin convertir
-    // la cola en una campana afinada. El detector rechaza graves sostenidos y excita
-    // modos breves y desparejos; el primer rebote permanece, pero cae dentro de la cola.
-    private readonly SpringDripBank _springDripLeft;
-    private readonly SpringDripBank _springDripRight;
-    private readonly float _springFastAttackCoefficient;
-    private readonly float _springFastReleaseCoefficient;
-    private readonly float _springSlowAttackCoefficient;
-    private readonly float _springSlowReleaseCoefficient;
-    private float _springFastEnvelope;
-    private float _springSlowEnvelope;
-    private float _springPreviousDetectorInput;
-    private float _springDetectorLowPass;
-    private float _springTransientDrive;
-    private int _springDripCooldownSamples;
+    private readonly SpringTank _springTankLeft;
+    private readonly SpringTank _springTankRight;
 
     public ReverbEffect(int sampleRate)
     {
@@ -98,13 +80,6 @@ internal sealed class ReverbEffect
         _internalRate = internalRate;
         float scale = internalRate / 44100f;
 
-        _springDripLeft = new SpringDripBank(_internalRate, 0.992f);
-        _springDripRight = new SpringDripBank(_internalRate, 1.011f);
-        _springFastAttackCoefficient = EnvelopeCoefficient(1.4f, _sampleRate);
-        _springFastReleaseCoefficient = EnvelopeCoefficient(38f, _sampleRate);
-        _springSlowAttackCoefficient = EnvelopeCoefficient(19f, _sampleRate);
-        _springSlowReleaseCoefficient = EnvelopeCoefficient(170f, _sampleRate);
-
         int[] combLengths = { 1116, 1188, 1277, 1356, 1422, 1491 };
         _leftCombs = combLengths
             .Select(length => new CombFilter(ScaleLength(length, scale)))
@@ -112,6 +87,11 @@ internal sealed class ReverbEffect
         _rightCombs = combLengths
             .Select(length => new CombFilter(ScaleLength(length + 23, scale)))
             .ToArray();
+
+        // Spring reutiliza tres buffers comb. Las rutas son excluyentes y el
+        // cambio de tipo conserva ResetTank antes de reutilizar estos buffers.
+        _springTankLeft = new SpringTank(_internalRate, _leftCombs, 0.992f);
+        _springTankRight = new SpringTank(_internalRate, _rightCombs, 1.011f);
 
         int[] allPassLengths = { 556, 441, 341 };
         _leftAllPasses = allPassLengths
@@ -342,6 +322,8 @@ internal sealed class ReverbEffect
                 break;
 
             default: // Spring
+                _springTankLeft.Configure(decay, tone, userDamping, userDiffusion);
+                _springTankRight.Configure(decay, tone, userDamping, userDiffusion);
                 // Resorte: más ataque metálico y drip, con una imagen más centrada que
                 // los espacios acústicos grandes.
                 feedbackBase = 0.64f; feedbackRange = 0.20f;
@@ -353,7 +335,7 @@ internal sealed class ReverbEffect
                 // Un tanque físico devuelve el primer golpe casi de inmediato. El predelay
                 // largo ocultaba justamente el rebote que se percibe al atacar una cuerda.
                 effectivePreDelay = Math.Clamp(preDelayMs * 0.22f, 1.5f, 9f);
-                earlyTap1Ms = 2.5f; earlyTap2Ms = 5.8f; earlyTap3Ms = 11.5f;
+                earlyTap1Ms = 22f; earlyTap2Ms = 37f; earlyTap3Ms = 59f;
                 break;
         }
 
@@ -397,9 +379,6 @@ internal sealed class ReverbEffect
             return;
         }
 
-        if (_character == ReverbCharacter.Spring && _springAmount > 0.001f)
-            TrackSpringTransient(inputLeft, inputRight);
-
         if (!_halfRatePhase)
         {
             _pendingInputLeft = inputLeft;
@@ -430,93 +409,82 @@ internal sealed class ReverbEffect
             ReadDelayTap(_preDelayRight, _preDelayWriteRight, _earlyTapSamples2 + 3) * 0.28f +
             ReadDelayTap(_preDelayRight, _preDelayWriteRight, _earlyTapSamples3 + 5) * 0.20f;
 
-        float excitationGain = _character switch
-        {
-            ReverbCharacter.Room => 0.20f,
-            ReverbCharacter.Spring => 0.30f,
-            ReverbCharacter.Plate => 0.34f,
-            ReverbCharacter.Hall => 0.38f,
-            ReverbCharacter.Church => 0.41f,
-            ReverbCharacter.Shimmer => 0.42f,
-            ReverbCharacter.Cathedral => 0.46f,
-            _ => 0.34f
-        };
-
-        float monoPre = (preLeft + preRight) * 0.5f;
-        float monoExcitation = monoPre * (excitationGain * 2f);
-
-        // Shimmer económico: la rectificación de onda completa genera una componente de
-        // octava; se elimina su continua con un seguidor lento antes de excitar la cola.
-        if (_shimmerAmount > 0.001f)
-        {
-            float rectified = MathF.Abs(monoPre);
-            _shimmerDc += (rectified - _shimmerDc) * 0.008f;
-            float octaveLike = rectified - _shimmerDc;
-            monoExcitation += octaveLike * _shimmerAmount;
-        }
-
         float wetLeft = 0f;
         float wetRight = 0f;
-        int combCount = Math.Clamp(_activeCombs, 1, _leftCombs.Length);
-        for (int index = 0; index < combCount; index++)
-        {
-            float alternating = (index & 1) == 0 ? monoExcitation : -monoExcitation;
-            float spread = 0.24f + (_diffusionAmount * 0.38f);
-            float direct = _character switch
-            {
-                ReverbCharacter.Spring => 0.56f,
-                ReverbCharacter.Room => 0.44f,
-                ReverbCharacter.Plate => 0.20f,
-                _ => 0.28f
-            };
-            wetLeft += _leftCombs[index].Process((preLeft * direct) + (alternating * spread));
-            wetRight += _rightCombs[index].Process((preRight * direct) - (alternating * spread));
-        }
-
-        float wetScale = _character switch
-        {
-            ReverbCharacter.Room => 0.16f,
-            ReverbCharacter.Spring => 0.18f,
-            ReverbCharacter.Plate => 0.18f,
-            ReverbCharacter.Hall => 0.19f,
-            ReverbCharacter.Church => 0.20f,
-            ReverbCharacter.Shimmer => 0.205f,
-            ReverbCharacter.Cathedral => 0.22f,
-            _ => 0.18f
-        };
-        wetLeft *= wetScale;
-        wetRight *= wetScale;
-
-        // Room se reconoce especialmente por las primeras reflexiones; en los ambientes
-        // grandes éstas quedan más atrás respecto de la cola difusa.
-        wetLeft += earlyLeft * _earlyReflectionGain;
-        wetRight += earlyRight * _earlyReflectionGain;
-
-        int passes = Math.Clamp(_allPassPasses, 1, _leftAllPasses.Length);
-        for (int i = 0; i < passes; i++)
-        {
-            wetLeft = _leftAllPasses[i].Process(wetLeft);
-            wetRight = _rightAllPasses[i].Process(wetRight);
-        }
-
         if (_springAmount > 0.001f)
         {
-            // Componente continua del tanque: conserva la coloración metálica anterior.
-            float springLeft = ProcessSpringResonance(preLeft + earlyLeft * 0.30f, ref _springLeft1, ref _springLeft2);
-            float springRight = ProcessSpringResonance(preRight + earlyRight * 0.30f, ref _springRight1, ref _springRight2);
+            wetLeft = _springTankLeft.Process(preLeft, earlyLeft);
+            wetRight = _springTankRight.Process(preRight, earlyRight);
+        }
+        else
+        {
+            float excitationGain = _character switch
+            {
+                ReverbCharacter.Room => 0.20f,
+                ReverbCharacter.Spring => 0.30f,
+                ReverbCharacter.Plate => 0.34f,
+                ReverbCharacter.Hall => 0.38f,
+                ReverbCharacter.Church => 0.41f,
+                ReverbCharacter.Shimmer => 0.42f,
+                ReverbCharacter.Cathedral => 0.46f,
+                _ => 0.34f
+            };
 
-            // Drip dependiente del ataque. Se consume el pico acumulado durante las dos
-            // muestras de entrada que forman cada muestra interna, evitando perder el golpe.
-            float dripDrive = _springTransientDrive;
-            _springTransientDrive = 0f;
-            float dripLeft = _springDripLeft.Process(dripDrive);
-            float dripRight = _springDripRight.Process(dripDrive * 0.97f);
+            float monoPre = (preLeft + preRight) * 0.5f;
+            float monoExcitation = monoPre * (excitationGain * 2f);
 
-            // 2.41.35: menos resonancia continua y un drip más corto. El rebote
-            // aparece detrás del ataque y después se integra a la cola, sin quedarse
-            // cantando una nota metálica fija debajo del acorde.
-            wetLeft += ((springLeft * 0.16f) + (dripLeft * 0.52f)) * _springAmount;
-            wetRight += ((springRight * 0.16f) + (dripRight * 0.52f)) * _springAmount;
+            // Shimmer económico: la rectificación de onda completa genera una componente de
+            // octava; se elimina su continua con un seguidor lento antes de excitar la cola.
+            if (_shimmerAmount > 0.001f)
+            {
+                float rectified = MathF.Abs(monoPre);
+                _shimmerDc += (rectified - _shimmerDc) * 0.008f;
+                float octaveLike = rectified - _shimmerDc;
+                monoExcitation += octaveLike * _shimmerAmount;
+            }
+
+            int combCount = Math.Clamp(_activeCombs, 1, _leftCombs.Length);
+            for (int index = 0; index < combCount; index++)
+            {
+                float alternating = (index & 1) == 0 ? monoExcitation : -monoExcitation;
+                float spread = 0.24f + (_diffusionAmount * 0.38f);
+                float direct = _character switch
+                {
+                    ReverbCharacter.Spring => 0.56f,
+                    ReverbCharacter.Room => 0.44f,
+                    ReverbCharacter.Plate => 0.20f,
+                    _ => 0.28f
+                };
+                wetLeft += _leftCombs[index].Process((preLeft * direct) + (alternating * spread));
+                wetRight += _rightCombs[index].Process((preRight * direct) - (alternating * spread));
+            }
+
+            float wetScale = _character switch
+            {
+                ReverbCharacter.Room => 0.16f,
+                ReverbCharacter.Spring => 0.18f,
+                ReverbCharacter.Plate => 0.18f,
+                ReverbCharacter.Hall => 0.19f,
+                ReverbCharacter.Church => 0.20f,
+                ReverbCharacter.Shimmer => 0.205f,
+                ReverbCharacter.Cathedral => 0.22f,
+                _ => 0.18f
+            };
+            wetLeft *= wetScale;
+            wetRight *= wetScale;
+
+            // Room se reconoce especialmente por las primeras reflexiones; en los ambientes
+            // grandes éstas quedan más atrás respecto de la cola difusa.
+            wetLeft += earlyLeft * _earlyReflectionGain;
+            wetRight += earlyRight * _earlyReflectionGain;
+
+            int passes = Math.Clamp(_allPassPasses, 1, _leftAllPasses.Length);
+            for (int i = 0; i < passes; i++)
+            {
+                wetLeft = _leftAllPasses[i].Process(wetLeft);
+                wetRight = _rightAllPasses[i].Process(wetRight);
+            }
+
         }
 
         if (_plateSheen > 0.001f)
@@ -632,66 +600,8 @@ internal sealed class ReverbEffect
         _previousWetLeft = 0f;
         _previousWetRight = 0f;
         _shimmerDc = 0f;
-        _springLeft1 = 0f;
-        _springLeft2 = 0f;
-        _springRight1 = 0f;
-        _springRight2 = 0f;
-        _springFastEnvelope = 0f;
-        _springSlowEnvelope = 0f;
-        _springPreviousDetectorInput = 0f;
-        _springDetectorLowPass = 0f;
-        _springTransientDrive = 0f;
-        _springDripCooldownSamples = 0;
-        _springDripLeft.Reset();
-        _springDripRight.Reset();
-    }
-
-    private void TrackSpringTransient(float inputLeft, float inputRight)
-    {
-        float mono = (inputLeft + inputRight) * 0.5f;
-
-        // El transductor de un tanque real no responde a los graves sostenidos como
-        // una campana. Este paso alto sencillo conserva púa/rasgueo y evita que la
-        // fundamental de los acordes mantenga excitado el rebote.
-        _springDetectorLowPass += (mono - _springDetectorLowPass) * 0.052f;
-        float detector = mono - _springDetectorLowPass;
-        float level = MathF.Abs(detector);
-
-        float fastCoefficient = level > _springFastEnvelope
-            ? _springFastAttackCoefficient
-            : _springFastReleaseCoefficient;
-        float slowCoefficient = level > _springSlowEnvelope
-            ? _springSlowAttackCoefficient
-            : _springSlowReleaseCoefficient;
-
-        _springFastEnvelope += (level - _springFastEnvelope) * fastCoefficient;
-        _springSlowEnvelope += (level - _springSlowEnvelope) * slowCoefficient;
-
-        float edge = detector - _springPreviousDetectorInput;
-        _springPreviousDetectorInput = detector;
-
-        if (_springDripCooldownSamples > 0)
-        {
-            _springDripCooldownSamples--;
-            return;
-        }
-
-        // Sólo ataques claros. La excitación se comprime para que un acorde fuerte
-        // no produzca un boing desproporcionado respecto de una cuerda individual.
-        float onset = MathF.Max(0f, _springFastEnvelope - _springSlowEnvelope - 0.00065f);
-        float rawMagnitude = (onset * 1.65f) + (MathF.Abs(edge) * 0.0045f);
-        float magnitude = Math.Clamp(rawMagnitude / (1f + rawMagnitude * 9f), 0f, 0.090f);
-        if (magnitude < 0.0028f || magnitude <= MathF.Abs(_springTransientDrive)) return;
-
-        float polaritySource = MathF.Abs(edge) > 0.00001f ? edge : detector;
-        _springTransientDrive = MathF.CopySign(magnitude, polaritySource == 0f ? 1f : polaritySource);
-        _springDripCooldownSamples = Math.Max(1, (int)(_sampleRate * 0.044f));
-    }
-
-    private static float EnvelopeCoefficient(float timeMs, int sampleRate)
-    {
-        float samples = MathF.Max(1f, sampleRate * MathF.Max(0.1f, timeMs) / 1000f);
-        return 1f - MathF.Exp(-1f / samples);
+        _springTankLeft.Reset();
+        _springTankRight.Reset();
     }
 
     private int ToDelaySamples(float delayMs, int bufferLength) =>
@@ -716,110 +626,135 @@ internal sealed class ReverbEffect
         return FastDspMath.FlushDenormal(buffer[readIndex]);
     }
 
-    private static float ProcessSpringResonance(float input, ref float state1, ref float state2)
+    // 2.41.73: dispersion en tres recorridos inarmonicos, sin tonos sinteticos.
+    // Solo se asignan estados pequenos en el constructor; se reutilizan los delays.
+    private sealed class SpringTank
     {
-        // Color metálico breve y de bajo nivel. La cola principal queda a cargo
-        // del tanque difuso; así la resonancia no se sostiene como una nota afinada.
-        float previous = state1;
-        float y = (input * 0.105f) + (state1 * 1.69f) - (state2 * 0.75f);
-        y = FastDspMath.SoftClip(y * 0.66f);
-        state2 = previous;
-        state1 = FastDspMath.FlushDenormal(y);
-        return FastDspMath.FlushDenormal(y - previous * 0.70f);
-    }
+        private readonly SpringPath[] _paths;
+        private readonly float[] _earlyPhase = new float[6];
+        private readonly float _highPass, _fastAttack, _fastRelease, _slowAttack, _slowRelease;
+        private readonly int _cooldownLength;
+        private float _inputLow, _earlyLow, _fast, _slow, _attack;
+        private int _cooldown;
+        private uint _strike = 0x6d2b79f5;
+        private float _phaseVariation;
 
-    private sealed class SpringDripBank
-    {
-        private DampedMode _body;
-        private DampedMode _bodySpread;
-        private DampedMode _lowerMetal;
-        private DampedMode _midMetal;
-        private DampedMode _upperMetal;
-        private DampedMode _splash;
-        private DampedMode _edge;
-
-        public SpringDripBank(int sampleRate, float tuningScale)
+        public SpringTank(int rate, CombFilter[] combs, float tuning)
         {
-            // Más modos, pero cada uno más corto y débil. La energía se reparte
-            // para evitar una frecuencia dominante que suene a campana electrónica.
-            _body = new DampedMode(sampleRate, 565f * tuningScale, 205f, 0.135f);
-            _bodySpread = new DampedMode(sampleRate, 710f * tuningScale, 175f, -0.095f);
-            _lowerMetal = new DampedMode(sampleRate, 930f * tuningScale, 145f, 0.082f);
-            _midMetal = new DampedMode(sampleRate, 1190f * tuningScale, 112f, -0.068f);
-            _upperMetal = new DampedMode(sampleRate, 1580f * tuningScale, 82f, 0.052f);
-            _splash = new DampedMode(sampleRate, 2680f * tuningScale, 43f, -0.032f);
-            _edge = new DampedMode(sampleRate, 3820f * tuningScale, 25f, 0.016f);
+            _highPass = Coefficient(120f, rate);
+            _fastAttack = TimeCoefficient(0.0015f, rate);
+            _fastRelease = TimeCoefficient(0.025f, rate);
+            _slowAttack = TimeCoefficient(0.020f, rate);
+            _slowRelease = TimeCoefficient(0.120f, rate);
+            _cooldownLength = Math.Max(1, (int)(rate * 0.080f));
+            _paths = new[] {
+                new SpringPath(rate, combs[0].SpringBuffer, 0.57f * tuning, 0.93f),
+                new SpringPath(rate, combs[2].SpringBuffer, 0.66f * tuning, 1.07f),
+                new SpringPath(rate, combs[5].SpringBuffer, 0.73f * tuning, 0.87f) };
         }
 
-        public float Process(float excitation)
+        public void Configure(float decay, float tone, float damping, float diffusion)
         {
-            float x = FastDspMath.SoftClip(excitation * 0.92f);
-            float y =
-                _body.Process(x) +
-                _bodySpread.Process(x) +
-                _lowerMetal.Process(x) +
-                _midMetal.Process(x) +
-                _upperMetal.Process(x) +
-                _splash.Process(x) +
-                _edge.Process(x);
-            return FastDspMath.FlushDenormal(FastDspMath.SoftClip(y * 0.78f));
+            foreach (var path in _paths) path.Configure(decay, tone, damping, diffusion);
         }
 
-        public void Reset()
+        public float Process(float input, float early)
         {
-            _body.Reset();
-            _bodySpread.Reset();
-            _lowerMetal.Reset();
-            _midMetal.Reset();
-            _upperMetal.Reset();
-            _splash.Reset();
-            _edge.Reset();
-        }
-    }
-
-    private struct DampedMode
-    {
-        private readonly float _a1;
-        private readonly float _a2;
-        private readonly float _gain;
-        private float _y1;
-        private float _y2;
-
-        public DampedMode(int sampleRate, float frequencyHz, float decayMs, float gain)
-        {
-            float safeFrequency = Math.Clamp(frequencyHz, 80f, sampleRate * 0.42f);
-            float decaySeconds = MathF.Max(0.02f, decayMs / 1000f);
-            float radius = MathF.Exp(-1f / (sampleRate * decaySeconds));
-            float angle = 2f * MathF.PI * safeFrequency / sampleRate;
-            _a1 = 2f * radius * MathF.Cos(angle);
-            _a2 = -(radius * radius);
-            _gain = gain;
-            _y1 = 0f;
-            _y2 = 0f;
-        }
-
-        public float Process(float input)
-        {
-            float y = input + (_a1 * _y1) + (_a2 * _y2);
-            if (!float.IsFinite(y))
+            _inputLow = FastDspMath.FlushDenormal(_inputLow + (input - _inputLow) * _highPass);
+            float body = input - _inputLow;
+            float level = MathF.Abs(body);
+            _fast += (level - _fast) * (level > _fast ? _fastAttack : _fastRelease);
+            _slow += (level - _slow) * (level > _slow ? _slowAttack : _slowRelease);
+            float onset = Math.Clamp((_fast - _slow * 1.18f - 0.001f) * 8f, 0f, 1f);
+            _attack = FastDspMath.FlushDenormal(_attack + (onset - _attack) * _fastRelease);
+            if (_cooldown > 0) _cooldown--;
+            if (onset > 0.08f && _cooldown == 0)
             {
-                _y1 = 0f;
-                _y2 = 0f;
-                return 0f;
+                // Variacion minima por ataque; sin LFO ni cambios de longitud.
+                _strike ^= _strike << 13; _strike ^= _strike >> 17; _strike ^= _strike << 5;
+                _phaseVariation = ((_strike & 1023) / 1023f - 0.5f) * 0.008f;
+                _cooldown = _cooldownLength;
             }
+            float drive = FastDspMath.SoftClip(body * (0.55f + _attack * 0.22f));
+            float tail = _paths[0].Process(drive, _phaseVariation * _attack)
+                - _paths[1].Process(drive, -_phaseVariation * _attack) * 0.72f
+                + _paths[2].Process(drive, _phaseVariation * _attack) * 0.53f;
 
-            // El límite es sólo de seguridad ante un impulso extremo; en uso normal
-            // el resonador permanece muy por debajo de este valor.
-            y = Math.Clamp(y, -3.5f, 3.5f);
-            _y2 = _y1;
-            _y1 = FastDspMath.FlushDenormal(y);
-            return FastDspMath.FlushDenormal(y * _gain);
+            _earlyLow = FastDspMath.FlushDenormal(_earlyLow + (early - _earlyLow) * _highPass);
+            float reflection = early - _earlyLow;
+            for (int i = 0; i < _earlyPhase.Length; i++)
+            {
+                float output = _earlyPhase[i] - 0.63f * reflection;
+                _earlyPhase[i] = FastDspMath.FlushDenormal(reflection + 0.63f * output);
+                reflection = output;
+            }
+            // El primer retorno se dispersa para evitar un eco slapback separado.
+            return tail * 0.52f + reflection * (0.50f + _attack * 0.10f);
         }
 
         public void Reset()
         {
-            _y1 = 0f;
-            _y2 = 0f;
+            _inputLow = _earlyLow = _fast = _slow = _attack = _phaseVariation = 0f;
+            _cooldown = 0;
+            _strike = 0x6d2b79f5;
+            Array.Clear(_earlyPhase);
+            foreach (var path in _paths) path.Reset();
+        }
+
+        private static float Coefficient(float hz, int rate) => 1f - MathF.Exp(-2f * MathF.PI * hz / rate);
+        private static float TimeCoefficient(float seconds, int rate) => 1f - MathF.Exp(-1f / (seconds * rate));
+    }
+
+    private sealed class SpringPath
+    {
+        private readonly float[] _delay, _dispersion;
+        private readonly float _dispersionBase, _lossScale;
+        private readonly int _rate;
+        private int _index;
+        private float _feedback, _lowPass, _loss, _dispersionCoefficient;
+
+        public SpringPath(int rate, float[] delay, float dispersion, float lossScale)
+        {
+            _rate = rate;
+            _delay = delay;
+            _dispersion = new float[Math.Clamp((int)MathF.Round(24f * rate / 24000f), 4, 48)];
+            _dispersionBase = dispersion;
+            _lossScale = lossScale;
+        }
+
+        public void Configure(float decay, float tone, float damping, float diffusion)
+        {
+            // Cola compacta: el tiempo efectivo incluye las perdidas por vuelta.
+            float decaySeconds = 0.45f + decay * 0.65f;
+            _feedback = MathF.Pow(0.001f, _delay.Length / (_rate * decaySeconds));
+            float cutoff = (2300f + tone * 2800f - damping * 1300f) * _lossScale;
+            _loss = 1f - MathF.Exp(-2f * MathF.PI * cutoff / _rate);
+            _dispersionCoefficient = _dispersionBase + (diffusion - 0.5f) * 0.06f;
+        }
+
+        public float Process(float input, float variation)
+        {
+            float dispersed = _delay[_index];
+            float coefficient = _dispersionCoefficient + variation;
+            for (int i = 0; i < _dispersion.Length; i++)
+            {
+                float output = _dispersion[i] - coefficient * dispersed;
+                _dispersion[i] = FastDspMath.FlushDenormal(dispersed + coefficient * output);
+                dispersed = output;
+            }
+            // Los agudos pierden energia en cada vuelta, los medios conservan cuerpo.
+            _lowPass = FastDspMath.FlushDenormal(_lowPass + (dispersed - _lowPass) * _loss);
+            _delay[_index] = FastDspMath.FlushDenormal(input + _lowPass * _feedback);
+            if (++_index == _delay.Length) _index = 0;
+            return _lowPass;
+        }
+
+        public void Reset()
+        {
+            // ResetTank ya limpia el buffer compartido con CombFilter.
+            Array.Clear(_dispersion);
+            _index = 0;
+            _lowPass = 0f;
         }
     }
 
@@ -843,6 +778,8 @@ internal sealed class ReverbEffect
         private float _feedback;
         private float _damping;
         private float _filterState;
+
+        public float[] SpringBuffer => _buffer;
 
         public CombFilter(int length)
         {

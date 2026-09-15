@@ -1,3 +1,11 @@
+Amp Accessible 2.41.73 - Spring Reverb Realista JAWS
+Base estable aprobada: 2.41.72 (faa76d5).
+- Cambio DSP exclusivo de Spring: reemplazo de resonadores fijos y disparador de drip por tres recorridos de resorte dispersivos de distinta longitud, con filtro de entrada y perdidas de agudos por vuelta. Sin LFO ni osciladores tonales.
+- Reflexiones iniciales cortas y fondo difuso reducido; retorno principal irregular con dispersion dependiente de frecuencia. Decay, Tone, Damping y Diffusion controlan el nuevo tanque. Sin cambios de nombres, indices, interfaz ni persistencia.
+- Plate, Room, Hall, Church, Shimmer y Cathedral: 29.390.400 muestras de canal identicas a la base en pruebas a 16000/44100/48000/96000 Hz y controles 0/50/100. Resto de bloques sin modificaciones.
+- Spring: salida finita con ruido seguido de silencio, pico 0,352116 en la matriz probada; bypass exacto y 0 bytes asignados en 480.000 llamadas medidas. Estas pruebas no certifican todos los niveles de entrada ni el callback ASIO completo.
+- Release: 0 errores y 7 advertencias preexistentes. Pendiente escucha con guitarra limpia, crunch y lead para validar el caracter perceptual, y comprobacion con JAWS y hardware ASIO.
+
 Amp Accessible 2.41.72 - Slap Natural Contundente JAWS
 Base estable aprobada: 2.41.71 (8ce23ea).
 - Cambio exclusivo del modo 4 Slap contundente en BassAccompanimentGenerator. Indice, patrones, numero y posicion de golpes, seleccion de notas, acordes, duraciones armonicas y ganancia global del usuario conservados.
