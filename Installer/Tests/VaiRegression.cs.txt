@@ -1,0 +1,112 @@
+using System.Diagnostics;
+using System.Text.Json;
+using GDMAmpAccessible.Models;
+using GDMAmpAccessible.Dsp;
+using GDMAmpAccessible.Persistence;
+
+internal static class TestPaths
+{
+    public static string Root = "";
+    public static string GetFolderPath(Environment.SpecialFolder folder)
+    { var p=Path.Combine(Root,folder.ToString()); Directory.CreateDirectory(p); return p; }
+}
+
+internal static class VaiRegression
+{
+    static string J<T>(T x)=>JsonSerializer.Serialize(x);
+    static void Check(bool ok,string message){if(!ok)throw new Exception(message);}
+    static DspParameters Sound(ScenePreset s)=>JsonSerializer.Deserialize<DspParameters>(J(s))! with {Revision=1};
+    static readonly string[] Styles={"single","legato","bend","vibrato","fast","dyad","palm"};
+
+    // Deterministic guitar-like excitation, not a recording or perceptual certification.
+    static float[] Input(int rate,int style,float level)
+    {
+        var data=new float[rate*4]; double phase=0,phase2=0,peak=0;
+        for(int i=0;i<rate*3;i++)
+        {
+            double t=(double)i/rate;
+            double period=style==4?.12:style==1?.35:style==6?.3:3;
+            double age=t%period;
+            int note=(int)(t/period)%5;
+            double f=style is 1 or 4 ? 220*Math.Pow(2,new[]{0,3,5,7,10}[note]/12.0):220;
+            if(style==2)f*=Math.Pow(2,2*Math.Min(t/1.2,1)/12);
+            if(style==3)f*=Math.Pow(2,.25*Math.Sin(2*Math.PI*5*t)/12);
+            phase+=2*Math.PI*f/rate;phase2+=2*Math.PI*f*1.5/rate;
+            double env=style==1 ? Math.Min(1,t*400)*Math.Exp(-t*.5) : Math.Min(1,age*400)*Math.Exp(-age*(style==6?22:style==4?9:1.4));
+            double v=(Math.Sin(phase)+.22*Math.Sin(phase*2)+.08*Math.Sin(phase*3))*env;
+            if(style==5)v+=(Math.Sin(phase2)+.15*Math.Sin(phase2*2))*env;
+            data[i]=(float)v;peak=Math.Max(peak,Math.Abs(v));
+        }
+        for(int i=0;i<data.Length;i++)data[i]*=(float)(level/peak);
+        return data;
+    }
+
+    static void Main(string[] args)
+    {
+        try
+        {
+            TestPaths.Root=Path.Combine(args[0],"TestData","Vai");
+            Check(FactoryPresetBank.Presets.Count==37,"Factory count changed");
+            for(int i=0;i<37;i++)if(i!=31)
+                Check(J(FactoryPresetBank.Presets[i])==J(BaselineAmpAccessible.Persistence.FactoryPresetBank.Presets[i]),$"Preset F{i+1} changed");
+            var now=FactoryPresetBank.Presets[31];var old=BaselineAmpAccessible.Persistence.FactoryPresetBank.Presets[31];
+            var oldSound=JsonSerializer.Deserialize<ScenePreset>(J(old.Sound))!;
+            Check(J(now.Sound with {Gain=oldSound.Gain,OutputPercent=oldSound.OutputPercent})==J(oldSound),"F32 changed beyond Gain/Output");
+            Check(now.Sound.Gain==6.7f && now.Sound.OutputPercent<=39.9f && now.Sound.Ts9Gain==.9f,"F32 constraints");
+            Check(!now.Sound.AutoWahEnabled && now.Sound.AutoWahCharacter==AutoWahCharacter.VaiBadHorsie,"Wah changed");
+            Check(J(now.PreEffectOrder)==J(old.PreEffectOrder),"Effect order changed");
+            long identical=0;
+            foreach(int rate in new[]{44100,48000,96000})
+            {
+                using var a=new AudioProcessor(rate);using var b=new BaselineAmpAccessible.Dsp.AudioProcessor(rate);
+                var p=FactoryPresetBank.Presets[30];var q=BaselineAmpAccessible.Persistence.FactoryPresetBank.Presets[30];
+                a.SetParameters(Sound(p.Sound) with {PreEffectOrder=p.PreEffectOrder.ToArray()});
+                b.SetParameters(JsonSerializer.Deserialize<BaselineAmpAccessible.Models.DspParameters>(J(q.Sound))! with {Revision=1,PreEffectOrder=q.PreEffectOrder.ToArray()});
+                var input=Input(rate,5,.9f);var x=new float[256];var y=new float[256];var block=new float[128];
+                for(int n=0;n<input.Length;n+=128){int count=Math.Min(128,input.Length-n);Array.Copy(input,n,block,0,count);a.ProcessMonoToStereo(block,x,count);b.ProcessMonoToStereo(block,y,count);for(int k=0;k<count*2;k++){Check(x[k]==y[k],"F31 sample differs");identical++;}}
+            }
+            Console.WriteLine($"PASS metadata: other 36 presets identical. F31 strict regression: {identical} identical samples. DSP source checked by runner.");
+            var rows=new List<string>{"rate,style,input_peak,old_rms_dbfs,new_rms_dbfs,delta_db,old_peak,new_peak,attack_delta_db,late_delta_db"};
+            double peakMax=0,min=100,max=-100,sum=0,oldTotal=0,newTotal=0;long totalSamples=0;int cases=0;
+            foreach(int rate in new[]{44100,48000,96000})
+            for(int style=0;style<Styles.Length;style++)
+            foreach(float level in new[]{.12f,.45f,.98f})
+            {
+                using var a=new AudioProcessor(rate);using var b=new BaselineAmpAccessible.Dsp.AudioProcessor(rate);
+                a.SetParameters(Sound(now.Sound) with {PreEffectOrder=now.PreEffectOrder.ToArray()});
+                b.SetParameters(JsonSerializer.Deserialize<BaselineAmpAccessible.Models.DspParameters>(J(old.Sound))! with {Revision=1,PreEffectOrder=old.PreEffectOrder.ToArray()});
+                var input=Input(rate,style,level);var x=new float[256];var y=new float[256];var block=new float[128];
+                double ea=0,eb=0,pa=0,pb=0,aa=0,ab=0,la=0,lb=0;long samples=0;
+                for(int n=0;n<input.Length;n+=128)
+                {
+                    int count=Math.Min(128,input.Length-n);Array.Copy(input,n,block,0,count);a.ProcessMonoToStereo(block,x,count);b.ProcessMonoToStereo(block,y,count);
+                    for(int k=0;k<count*2;k++)
+                    {
+                        Check(float.IsFinite(x[k])&&float.IsFinite(y[k]),"Nonfinite sample");Check(Math.Abs(x[k])<1,"Clipped/out-of-range sample");
+                        pa=Math.Max(pa,Math.Abs(x[k]));pb=Math.Max(pb,Math.Abs(y[k]));
+                        int frame=n+k/2;
+                        if(frame<rate*3){ea+=x[k]*x[k];eb+=y[k]*y[k];samples++;}
+                        if(frame<rate*.06){aa+=x[k]*x[k];ab+=y[k]*y[k];}
+                        if(frame>=rate*2&&frame<rate*3){la+=x[k]*x[k];lb+=y[k]*y[k];}
+                    }
+                }
+                double delta=10*Math.Log10(ea/eb);min=Math.Min(min,delta);max=Math.Max(max,delta);sum+=delta;cases++;
+                peakMax=Math.Max(peakMax,pa);oldTotal+=eb;newTotal+=ea;totalSamples+=samples;
+                rows.Add(FormattableString.Invariant($"{rate},{Styles[style]},{level},{10*Math.Log10(eb/samples):F6},{10*Math.Log10(ea/samples):F6},{delta:F6},{pb:F6},{pa:F6},{10*Math.Log10(aa/ab):F6},{10*Math.Log10(la/lb):F6}"));
+            }
+            File.WriteAllLines(Path.Combine(args[0],"vai-levels.csv"),rows);
+            Console.WriteLine(FormattableString.Invariant($"F32 {cases} cases: peak {peakMax:F6} ({20*Math.Log10(peakMax):F3} dBFS); active RMS old {10*Math.Log10(oldTotal/totalSamples):F3}, new {10*Math.Log10(newTotal/totalSamples):F3} dBFS; delta min {min:F3}, max {max:F3}, mean {sum/cases:F3} dB. Zero clipping/nonfinite/out-of-range."));
+            Check(20*Math.Log10(peakMax)<=-.7,"Headroom target failed");Check(max<=0,"RMS increased");
+            using var perf=new AudioProcessor(48000);perf.SetParameters(Sound(now.Sound) with {PreEffectOrder=now.PreEffectOrder.ToArray()});
+            var signal=Input(48000,4,.98f);var inp=new float[128];var output=new float[256];Array.Copy(signal,128,inp,0,128);
+            for(int i=0;i<3000;i++)perf.ProcessMonoToStereo(inp,output,128);
+            long allocated=GC.GetAllocatedBytesForCurrentThread(),worst=0;int missed=0;
+            for(int i=0;i<10000;i++){long start=Stopwatch.GetTimestamp();perf.ProcessMonoToStereo(inp,output,128);long elapsed=Stopwatch.GetTimestamp()-start;worst=Math.Max(worst,elapsed);if(elapsed/(double)Stopwatch.Frequency>128.0/48000)missed++;}
+            allocated=GC.GetAllocatedBytesForCurrentThread()-allocated;
+            Console.WriteLine($"Offline 48k/128: {missed} exceeded deadlines, {allocated} allocated bytes; max {worst*1000.0/Stopwatch.Frequency:F3} ms.");
+            Check(missed==0,"Offline deadline missed");Check(allocated==0,"Audio allocations");
+            Console.WriteLine("PASS. Real guitar, perceptual tone/volume and Focusrite ASIO/JAWS remain unverified.");
+        }
+        catch(Exception e){Console.Error.WriteLine(e);Environment.Exit(1);}
+    }
+}

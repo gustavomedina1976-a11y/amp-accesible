@@ -1,3 +1,14 @@
+Amp Accessible 2.41.76 - Steve Vai Legacy Lead Cremoso JAWS
+Base estable: 2.41.75 (d5dda55).
+- Ajuste exclusivo F32 Steve Vai Legacy Lead: Gain Legacy 6.2 -> 6.7; OutputPercent 44 -> 39.9 para conservar nivel y headroom, sin superar el valor local ya acordado. Unicos dos parametros de sonido modificados.
+- TS808 conservado como boost suave: Gain 0.9, Tone 4.6, Level 6.2. No fue necesario subir Ts9Gain; limite absoluto 1.2. EQ, compresor, booster, gate, delay y Plate identicos a 2.41.75. Bad Horsie preparado y apagado por defecto.
+- Prueba determinista: 63 casos, siete articulaciones (notas, legato, bends, vibrato, frases rapidas, dos notas, palm mute leve), entradas pico 0.12/0.45/0.98, 44100/48000/96000 Hz, bloques de 128. Pico maximo 0.822993 (-1.692 dBFS). RMS activo conjunto anterior -10.612 y nuevo -11.063 dBFS; diferencias por caso -0.585 a -0.222 dB, media -0.403 dB. Cero clipping, muestras fuera de rango y NaN/Infinity. La cola posterior a la entrada no determina el balance. Metricas por caso, ataque y tramo sostenido en obj/VaiValidation/vai-levels.csv.
+- F31 intacto: configuracion exacta y 1.504.800 muestras identicas. F01-F30 y F33-F37 con configuracion exactamente igual, incluidos F26, F27 y banco Clean. Sin cambios de nombres, indices, bancos, accesibilidad, navegacion, escenas o persistencia.
+- DSP, AudioProcessor, AmpModel, efectos, NAM, IR, master, interfaz, Dos Guitarras, acompanamiento, grabadora, looper, afinador, perfiles y Loopback sin cambios. No se agrega limiter.
+- Rendimiento offline a 48 kHz/128: 10.000 bloques medidos, 0 plazos excedidos, 0 bytes asignados; bloque maximo 0.140 ms. Compilacion Release: 0 errores y 7 advertencias preexistentes. Pruebas reproducibles: Installer/Tests/Validate-Vai.ps1 contra el commit estable fijado.
+- Version y BuildName sincronizados. Sistema rapido de publicacion de 2.41.75 y UpdateService intactos: unico incremental Amp_Accessible_2.41.75_a_2.41.76.gdmupdate, junto con Setup, Publicacion.zip y update-channel.json. No se generan incrementales desde otras bases.
+- Pendiente validacion perceptiva con guitarra real: cremosidad, densidad, sustain, ataque, ruido y volumen percibido no estan aprobados por estas pruebas sinteticas. Focusrite USB ASIO 48 kHz/128 y JAWS requieren validacion fisica; el resultado offline no los certifica.
+
 Amp Accessible 2.41.75 - Nivelacion Clean y Actualizacion Rapida JAWS
 Base estable aprobada: 2.41.74 (aae68c1).
 - Nivelacion del banco Clean motivada por la diferencia perceptiva detectada con guitarra real. Unico cambio de audio: OutputPercent F35 Clean Arpeggio 33 -> 36 (+0,756 dB), F36 Clean Rhythm 33 -> 35 (+0,511 dB), F37 Clean Ambient 33 -> 35 (+0,511 dB). F33 Clean Warm y F34 Clean Worship permanecen en 33 como referencias. Nombres, indices, EQ, compresion, gain, delay, reverb y relacion seca/humeda conservados.
