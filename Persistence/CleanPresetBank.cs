@@ -28,6 +28,7 @@ internal static class CleanPresetBank
         }),
         P("Clean Arpeggio", Base() with
         {
+            OutputPercent = 36f,
             Bass = 4.0f, Middle = 5.0f, Treble = 5.5f, Presence = 4.5f,
             CompressorSustain = 2.0f, CompressorAttackMs = 30f,
             DelayEnabled = true, DelayTimeMs = 230f, DelayFeedbackPercent = 13f, DelayMixPercent = 10f,
@@ -36,6 +37,7 @@ internal static class CleanPresetBank
         }),
         P("Clean Rhythm", Base() with
         {
+            OutputPercent = 35f,
             Bass = 3.9f, Middle = 5.5f, Treble = 5.2f, Presence = 4.3f,
             CompressorSustain = 2.8f, CompressorAttackMs = 20f,
             ReverbCharacter = ReverbCharacter.Room, ReverbMixPercent = 7f,
@@ -43,6 +45,7 @@ internal static class CleanPresetBank
         }),
         P("Clean Ambient", Base() with
         {
+            OutputPercent = 35f,
             Bass = 4.2f, Middle = 5.0f, Treble = 5.0f, Presence = 4.0f,
             CompressorSustain = 1.6f, CompressorAttackMs = 32f,
             DelayEnabled = true, DelayTimeMs = 620f, DelayFeedbackPercent = 32f, DelayMixPercent = 24f,

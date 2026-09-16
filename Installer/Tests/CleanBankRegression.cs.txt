@@ -6,6 +6,9 @@ using GDMAmpAccessible.Models;
 using GDMAmpAccessible.Persistence;
 using GDMAmpAccessible.Dsp;
 using GDMAmpAccessible.Audio;
+using System.Runtime.InteropServices;
+using NAudio.Wave;
+using NAudio.Wave.Asio;
 
 internal static class TestPaths
 {
@@ -38,6 +41,7 @@ internal static class CheckClean
         MetadataAndPersistence();
         AudioRegression();
         LevelsAndTransitions();
+        Headroom();
         InterfaceAndDual();
         Console.WriteLine("PASS: all Clean bank checks. Hardware/JAWS/listening are not certified by these offline tests.");
         } catch(Exception ex) { Console.Error.WriteLine(ex); Environment.Exit(1); }
@@ -49,10 +53,14 @@ internal static class CheckClean
         Check(CleanPresetBank.AccessibleName == "Banco Clean dedicado","Accessible bank name");
         Check(FactoryPresetBank.Presets.Count == 37,"Factory count");
         for (int i=0;i<32;i++) Check(J(FactoryPresetBank.Presets[i]) == J(BaselineAmpAccessible.Persistence.FactoryPresetBank.Presets[i]),$"Old preset {i+1} changed");
+        Check(FactoryPresetBank.Presets[30].Name.Contains("Steve Vai Legacy Clean") && FactoryPresetBank.Presets[31].Name.Contains("Steve Vai Legacy Lead"), "F31/F32 missing");
         Check(J(ScenePreset.CreateFactoryDefaults()) == J(BaselineAmpAccessible.Models.ScenePreset.CreateFactoryDefaults()),"Initial scenes changed");
         for(int i=0;i<5;i++)
         {
             var p=CleanPresetBank.Presets[i]; var s=p.Sound;
+            var oldSound=JsonSerializer.Deserialize<ScenePreset>(J(BaselineAmpAccessible.Persistence.CleanPresetBank.Presets[i].Sound))!;
+            Check(J(s with {OutputPercent=oldSound.OutputPercent})==J(oldSound), "Clean character changed");
+            if(i<2) Check(J(s)==J(oldSound), "Warm/Worship reference changed");
             Check(p.Name == Names[i] && ReferenceEquals(p,FactoryPresetBank.Presets[32+i]),"Names/order");
             Check(CleanPresetBank.Description(p).Length>15,"Description");
             Check(s.Channel == AmpChannel.CleanTwin && s.Gain <= 2f,"Clean channel/gain");
@@ -107,27 +115,96 @@ internal static class CheckClean
 
     private static void AudioRegression()
     {
-        long samples=0;
+        long samples=0, vaiSamples=0;
         foreach(int rate in new[]{44100,48000})
         foreach(var preset in FactoryPresetBank.Presets.Take(32))
         {
             using var current=new AudioProcessor(rate);
             using var baseline=new BaselineAmpAccessible.Dsp.AudioProcessor(rate);
-            var p=Sound(preset.Sound); current.SetParameters(p);
-            baseline.SetParameters(JsonSerializer.Deserialize<BaselineAmpAccessible.Models.DspParameters>(J(p))!);
+            int index=FactoryPresetBank.Presets.ToList().IndexOf(preset);
+            var p=Sound(preset.Sound) with {PreEffectOrder=preset.PreEffectOrder.ToArray()}; current.SetParameters(p);
+            var oldPreset=BaselineAmpAccessible.Persistence.FactoryPresetBank.Presets[index];
+            baseline.SetParameters(JsonSerializer.Deserialize<BaselineAmpAccessible.Models.DspParameters>(J(oldPreset.Sound))! with {Revision=1,PreEffectOrder=oldPreset.PreEffectOrder.ToArray()});
             var input=new float[128]; var a=new float[256]; var b=new float[256];
             for(int n=0;n<rate;n+=128)
             {
                 int count=Math.Min(128,rate-n); Fill(input,n,count,rate,0,0,.4f,rate/2);
                 current.ProcessMonoToStereo(input,a,count); baseline.ProcessMonoToStereo(input,b,count);
-                for(int i=0;i<count*2;i++){Check(a[i]==b[i],$"Old audio changed {preset.Name}");samples++;}
+                for(int i=0;i<count*2;i++){Check(a[i]==b[i],$"Old audio changed {preset.Name}");samples++;if(index>=30)vaiSamples++;}
             }
         }
-        Console.WriteLine($"PASS regression: {samples} old-preset channel samples identical to 2.41.73, including Spring.");
+        Console.WriteLine($"PASS regression: {samples} F01-F32 channel samples identical to 2.41.74, including {vaiSamples} F31/F32 samples. Full metadata/effect order identical.");
+    }
+
+    // Fixed windows relative to the latest pluck. C never contributes to the A/B level gate.
+    // These deterministic pickup proxies are not recordings or a perceptual approval.
+    private static int Segment(int frame,int rate,int style)
+    {
+        if(frame>=rate*2)return 2;
+        double t=frame/(double)rate, age=double.MaxValue;
+        for(int k=0;k<(style==3?1:6);k++)
+        {
+            double offset=style==1?k*.12:style==2?k*.004:0;
+            if(t>=offset)age=Math.Min(age,(t-offset)%(style==1?.9:style==2?.3:1.0));
+        }
+        return age<.06?0:1;
+    }
+    private static void MeasureSegments()
+    {
+        var rows=new List<string>{"rate,style,pickup,input,preset,dry,output,A_dBFS,B_dBFS,C_dBFS,peak_dBFS"};
+        var sums=new double[5,3]; int summaries=0; double worst=0,peak=0;
+        foreach(int rate in new[]{44100,48000,96000})
+        foreach(int style in Enumerable.Range(0,4))
+        foreach(int pickup in new[]{0,1})
+        foreach(float level in new[]{.12f,.45f,.9f})
+        foreach(bool dry in new[]{false,true})
+        {
+            var db=new double[5,3];
+            for(int p=0;p<5;p++)
+            {
+                var sound=CleanPresetBank.Presets[p].Sound;
+                if(dry)sound=sound with {DelayEnabled=false,ReverbEnabled=false};
+                using var processor=new AudioProcessor(rate);processor.SetParameters(Sound(sound));
+                processor.ForceSimulationFullyOn();
+                var input=new float[128];var output=new float[256];var energy=new double[3];var countSamples=new long[3];double casePeak=0;
+                for(int n=0;n<rate*4;n+=128)
+                {
+                    int count=Math.Min(128,rate*4-n);Fill(input,n,count,rate,style,pickup,level,rate*2);
+                    processor.ProcessMonoToStereo(input,output,count);
+                    for(int i=0;i<count*2;i++)
+                    {
+                        double x=output[i];Check(double.IsFinite(x),"Segment nonfinite");
+                        casePeak=Math.Max(casePeak,Math.Abs(x));int segment=Segment(n+i/2,rate,style);
+                        energy[segment]+=x*x;countSamples[segment]++;
+                    }
+                }
+                peak=Math.Max(peak,casePeak);
+                for(int s=0;s<3;s++)db[p,s]=10*Math.Log10(Math.Max(1e-30,energy[s]/countSamples[s]));
+                rows.Add(FormattableString.Invariant($"{rate},{style},{pickup},{level},{p+33},{dry},{sound.OutputPercent},{db[p,0]:F6},{db[p,1]:F6},{db[p,2]:F6},{20*Math.Log10(casePeak):F6}"));
+            }
+            for(int s=0;s<2;s++)
+            {
+                double reference=(db[0,s]+db[1,s])/2;
+                worst=Math.Max(worst,Enumerable.Range(0,5).Max(p=>db[p,s])-Enumerable.Range(0,5).Min(p=>db[p,s]));
+                if(rate==48000 && level==.45f && !dry)
+                    for(int p=0;p<5;p++)sums[p,s]+=db[p,s]-reference;
+            }
+            if(rate==48000 && level==.45f && !dry)
+            {
+                summaries++;
+                for(int p=0;p<5;p++)sums[p,2]+=db[p,2];
+            }
+        }
+        File.WriteAllLines(Path.Combine(argsForDump(),"segments.csv"),rows);
+        for(int p=0;p<5;p++)Console.WriteLine($"SEGMENTS F{p+33}: A {sums[p,0]/summaries:F3} dB, B {sums[p,1]/summaries:F3} dB vs mean Warm/Worship; C {sums[p,2]/summaries:F3} dBFS (48k/.45, mean four styles/two pickups).");
+        Console.WriteLine($"SEGMENTS maximum A/B spread (wet and dry): {worst:F3} dB; peak {peak:F6} ({20*Math.Log10(peak):F3} dBFS).");
+        Check(worst<=1.5,"A/B spread exceeds 1.5 dB (not a perceptual approval)");
+        Check(peak<=Math.Pow(10,-.7/20),"Headroom below -0.7 dBFS");
     }
 
     private static void LevelsAndTransitions()
     {
+        MeasureSegments();
         float maxPeak=0; double maxSpread=0; int cases=0;
         foreach(int rate in new[]{44100,48000,96000})
         foreach(int style in Enumerable.Range(0,4))
@@ -157,7 +234,7 @@ internal static class CheckClean
             if(rate==48000 && pickup==0 && level==.45f) Console.WriteLine($"LEVEL style {style}: active RMS {string.Join(", ",rms.Select(x=>x.ToString("F6")))}; spread {spread:F3} dB; with tails {tailSpread:F3} dB");
         }
         Console.WriteLine($"AUDIO: {cases} Clean cases, max peak {maxPeak:F6}, max level spread {maxSpread:F3} dB.");
-        Check(maxSpread<=1.5,"Clean level spread exceeds 1.5 dB");
+        // Whole-tail RMS is reported for diagnostics only; MeasureSegments owns the A/B gate.
         float maxStep=0;
         foreach(var from in CleanPresetBank.Presets)
         foreach(var to in CleanPresetBank.Presets)
@@ -182,6 +259,47 @@ internal static class CheckClean
         bytes=GC.GetAllocatedBytesForCurrentThread()-bytes;
         Console.WriteLine($"OFFLINE PERFORMANCE 48k/128: {bytes} allocated bytes; {missed}/10000 over 2.667ms; max {maxTicks*1000.0/Stopwatch.Frequency:F3}ms. Not ASIO certification.");
         Check(bytes==0,"Per-block allocations");
+    }
+
+    private static void Headroom()
+    {
+        float peak=0;int cases=0;
+        foreach(bool dual in new[]{false,true})
+        foreach(int preset in Enumerable.Range(0,5))
+        foreach(int style in new[]{0,2,3})
+        {
+            using var engine=new AudioEngine();
+            foreach(string name in new[]{"_captureInput","_voiceInput","_guitar1Input","_guitar1Output","_guitar2Output","_guitar1LoopCapture","_guitar2LoopCapture","_processedOutput","_loopCaptureOutput","_meetOutput","_meetEndpointOutput"})
+                typeof(AudioEngine).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(engine,new float[256]);
+            typeof(AudioEngine).GetField("_meetBytes",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(engine,new byte[1024]);
+            engine.ConfigureMasterVolume(100);
+            engine.ConfigureTwoGuitarMode(dual,true,70,0,false,70,0,false);
+            var band=Sound(CleanPresetBank.Presets[preset].Sound) with {DrumsEnabled=true,BackingBassEnabled=true,PianoEnabled=true,BackingBassLine=4,AccompanimentFollowGuitar=false};
+            engine.Processor.SetParameters(dual?Sound(CleanPresetBank.Presets[preset].Sound):band);
+            engine.Guitar1Processor.SetParameters(Sound(CleanPresetBank.Presets[(preset+1)%5].Sound));
+            engine.ConfigureDualAccompaniment(band);
+            var callback=typeof(AudioEngine).GetMethod("OnAudioAvailable",BindingFlags.Instance|BindingFlags.NonPublic)!.CreateDelegate<Action<object?,AsioAudioAvailableEventArgs>>(engine);
+            var pins=new GCHandle[4];var buffers=new float[4][];
+            try
+            {
+                for(int i=0;i<4;i++){buffers[i]=new float[128];pins[i]=GCHandle.Alloc(buffers[i],GCHandleType.Pinned);}
+                var ev=new AsioAudioAvailableEventArgs(new[]{pins[0].AddrOfPinnedObject(),pins[1].AddrOfPinnedObject()},new[]{pins[2].AddrOfPinnedObject(),pins[3].AddrOfPinnedObject()},128,AsioSampleType.Float32LSB);
+                // Same coherent strong guitar on both inputs is a conservative summation case.
+                var signal=new float[48000*4];Fill(signal,0,signal.Length,48000,style,0,1f,48000*3);
+                float inputPeak=signal.Max(x=>Math.Abs(x));
+                for(int n=0;n<signal.Length;n+=128)
+                {
+                    for(int i=0;i<128;i++)buffers[0][i]=buffers[1][i]=signal[n+i]*.98f/inputPeak;
+                    callback(null,ev);
+                    for(int c=2;c<4;c++)foreach(float x in buffers[c]){Check(float.IsFinite(x)&&Math.Abs(x)<1,"Callback clipping");peak=Math.Max(peak,Math.Abs(x));}
+                }
+                foreach(string field in new[]{"_bufferErrorCount","_inputReadErrorCount","_dspErrorCount","_outputWriteErrorCount"})Check(Get<int>(engine,field)==0,"Callback error "+field);
+            }
+            finally{foreach(var pin in pins)if(pin.IsAllocated)pin.Free();}
+            cases++;
+        }
+        Console.WriteLine($"HEADROOM: {cases} real-engine offline callback cases 48k/128, input peak .98, band at factory defaults, dual mix 70/70 centered, master 100 unchanged; peak {peak:F6} ({20*Math.Log10(peak):F3} dBFS), input/DSP/output/buffer errors 0.");
+        Check(peak<=Math.Pow(10,-.7/20),"Mixed headroom below -0.7 dBFS");
     }
 
     private static string CanonicalScene(DualGuitarScenePreset scene)
@@ -212,6 +330,7 @@ internal static class CheckClean
                 factory.SelectedIndex=32+i;
                 var actual=Parameters(engine.Processor);
                 Check(actual.Channel==AmpChannel.CleanTwin && actual.Gain==1.5f,"UI clean channel/gain");
+                Check(actual.OutputPercent==CleanPresetBank.Presets[i].Sound.OutputPercent,"UI normalized preset output");
                 Check(actual.DelayEnabled==CleanPresetBank.Presets[i].Sound.DelayEnabled,"UI delay");
                 Check(actual.ReverbCharacter==CleanPresetBank.Presets[i].Sound.ReverbCharacter,"UI reverb");
                 Check(factory.AccessibleName==CleanPresetBank.AccessibleName && factory.AccessibleDescription==CleanPresetBank.AccessibleDescription,"UI accessibility");
@@ -235,6 +354,7 @@ internal static class CheckClean
                     var afterSaved=(DualGuitarBankPreset)Call(form,"CaptureDualGuitarBank",1-target,"Other",false)!;
                     Check(J(saved)==J(afterSaved),"Other guitar bank changed");
                     var own=target==0?engine.Guitar1Processor:engine.Processor;
+                    Check(Parameters(own).OutputPercent==CleanPresetBank.Presets[i].Sound.OutputPercent,"Dual output not applied");
                     Check(Parameters(own).CleanBass==CleanPresetBank.Presets[i].Sound.CleanBass,"Own EQ not applied");
                     string report=(string)Call(form,"BuildAudioDiagnosticReport")!;
                     Check(report.Contains($"Guitarra {target+1}. Banco: Clean. Preset: {Names[i]}"),"Dual diagnostic");

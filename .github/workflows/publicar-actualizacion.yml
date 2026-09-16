@@ -56,9 +56,14 @@ jobs:
         run: dotnet restore GDMAmpAccessible.csproj
 
       - name: Validar banco Clean y regresion de audio
-        if: steps.existing.outputs.exists != 'true' && steps.version.outputs.version == '2.41.74'
+        if: steps.existing.outputs.exists != 'true' && steps.version.outputs.version == '2.41.75'
         shell: pwsh
         run: '& ''Installer\Tests\Validate-CleanBank.ps1'''
+
+      - name: Validar actualizacion incremental y conservacion de datos
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: '& ''Installer\Tests\Validate-Updates.ps1'''
 
       - name: Publicar Windows x64 autocontenido
         if: steps.existing.outputs.exists != 'true'
@@ -96,7 +101,7 @@ jobs:
           $version='${{ steps.version.outputs.version }}'
           Copy-Item 'Installer\Salida\Amp_Accessible_Setup.exe' "artifacts\release\Amp_Accessible_${version}_Setup.exe" -Force
 
-      - name: Crear paquetes incrementales desde versiones publicadas anteriores
+      - name: Crear unico incremental desde la release inmediatamente anterior
         if: steps.existing.outputs.exists != 'true'
         shell: pwsh
         env:
@@ -106,31 +111,21 @@ jobs:
           $current='${{ steps.version.outputs.version }}'
           New-Item -ItemType Directory -Force -Path 'artifacts\incremental' | Out-Null
           New-Item -ItemType Directory -Force -Path 'artifacts\previous' | Out-Null
-          $releases = gh release list --repo '${{ github.repository }}' --limit 50 --json tagName | ConvertFrom-Json
+          # Paginate metadata only; download/extract/compare exactly one ZIP.
+          $pages = gh api --paginate --slurp 'repos/${{ github.repository }}/releases?per_page=100' | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'No se pudo consultar la lista de Releases.' }
-          foreach ($release in $releases) {
-            $tag = [string]$release.tagName
-            if ($tag -notmatch '^v(?<v>[0-9]+\.[0-9]+\.[0-9]+)$') { continue }
-            $previous = $Matches.v
-            try {
-              if ([version]$previous -ge [version]$current) { continue }
-            } catch { continue }
-            $download = Join-Path $PWD "artifacts\previous\$previous"
-            New-Item -ItemType Directory -Force -Path $download | Out-Null
-            gh release download $tag --repo '${{ github.repository }}' --pattern "Amp_Accessible_${previous}_Publicacion.zip" --dir $download --clobber
-            if ($LASTEXITCODE -ne 0) {
-              Write-Warning "Sin publicacion base para $previous"
-              $global:LASTEXITCODE = 0
-              continue
-            }
-            $zip = Join-Path $download "Amp_Accessible_${previous}_Publicacion.zip"
-            if (-not (Test-Path $zip)) { continue }
-            $old = Join-Path $download 'extraido'
-            Expand-Archive -LiteralPath $zip -DestinationPath $old -Force
-            $out = Join-Path $PWD "artifacts\incremental\Amp_Accessible_${previous}_a_${current}.gdmupdate"
-            & 'Installer\CREAR_PAQUETE_ACTUALIZACION.ps1' -Anterior $old -Nuevo (Join-Path $PWD 'artifacts\publish') -Desde $previous -Hasta $current -Salida $out
-          }
-          $global:LASTEXITCODE = 0
+          $releases = @($pages | ForEach-Object { $_ })
+          $base = & 'Installer\GitHub\SELECCIONAR_RELEASE_ANTERIOR.ps1' -Releases $releases -Version $current
+          $previous = $base.Version
+          $download = Join-Path $PWD 'artifacts\previous'
+          gh release download $base.Tag --repo '${{ github.repository }}' --pattern "Amp_Accessible_${previous}_Publicacion.zip" --dir $download
+          if ($LASTEXITCODE -ne 0) { throw "Falta el ZIP de la release inmediatamente anterior $previous." }
+          $zip = Join-Path $download "Amp_Accessible_${previous}_Publicacion.zip"
+          $old = Join-Path $download 'extraido'
+          Expand-Archive -LiteralPath $zip -DestinationPath $old
+          $out = Join-Path $PWD "artifacts\incremental\Amp_Accessible_${previous}_a_${current}.gdmupdate"
+          & 'Installer\CREAR_PAQUETE_ACTUALIZACION.ps1' -Anterior $old -Nuevo (Join-Path $PWD 'artifacts\publish') -Desde $previous -Hasta $current -Salida $out
+          if (@(Get-ChildItem 'artifacts\incremental' -Filter '*.gdmupdate').Count -ne 1) { throw 'Se esperaba un unico incremental.' }
 
       - name: Generar manifiesto del canal
         if: steps.existing.outputs.exists != 'true'
@@ -142,7 +137,12 @@ jobs:
             -Tag '${{ steps.version.outputs.tag }}' `
             -DirectorioPaquetes (Join-Path $PWD 'artifacts\incremental') `
             -Salida (Join-Path $PWD 'artifacts\release\update-channel.json')
-          Copy-Item 'artifacts\incremental\*.gdmupdate' 'artifacts\release' -Force -ErrorAction SilentlyContinue
+          Copy-Item 'artifacts\incremental\*.gdmupdate' 'artifacts\release' -Force
+
+      - name: Validar los cuatro archivos de la release
+        if: steps.existing.outputs.exists != 'true'
+        shell: pwsh
+        run: '& ''Installer\Tests\Validate-ReleaseAssets.ps1'' -Directory ''artifacts\release'' -Version ''${{ steps.version.outputs.version }}'' -Repository ''${{ github.repository }}'''
 
       - name: Preparar notas de la release
         if: steps.existing.outputs.exists != 'true'
@@ -153,10 +153,12 @@ jobs:
           Amp Accessible $version
 
           Canal automatico de pruebas mediante GitHub Releases.
-          El boton Buscar actualizaciones puede descargar paquetes incrementales con verificacion SHA-256.
+          Cada release genera un paquete incremental desde la version publicada inmediatamente anterior, con verificacion SHA-256.
+          Usuarios con versiones mas antiguas deben instalar la version completa.
 
           Importante: la publicacion automatica no borra NAM, IR, presets, escenas ni configuraciones personales existentes.
           "@ | Set-Content 'artifacts\release\NOTAS_RELEASE.txt' -Encoding UTF8
+          ((Get-Content 'HISTORIAL_Y_GUIA.txt' -Raw) -split '\r?\n\r?\n', 2)[0] | Add-Content 'artifacts\release\NOTAS_RELEASE.txt' -Encoding UTF8
 
       - name: Crear GitHub Release y subir archivos
         if: steps.existing.outputs.exists != 'true'

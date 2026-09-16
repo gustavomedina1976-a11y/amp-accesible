@@ -1,4 +1,4 @@
-param([string]$Baseline = '4afe8f74a6dd8b7279938edee28da6f4bede987b', [switch]$UiOnly)
+param([string]$Baseline = 'aae68c107367bb1b15152bf932515929650c7d64', [switch]$UiOnly)
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $work = Join-Path $repo 'obj\CleanValidation'

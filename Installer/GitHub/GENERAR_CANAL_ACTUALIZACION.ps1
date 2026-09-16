@@ -25,6 +25,8 @@ Get-ChildItem -LiteralPath $DirectorioPaquetes -Filter '*.gdmupdate' -File | Sor
     }
 }
 
+if ($packages.Count -ne 1) { throw 'El canal debe contener exactamente un paquete incremental.' }
+if ([version]$packages[0].FromVersion -ge [version]$Version) { throw 'Version de origen invalida.' }
 $manifest = [ordered]@{
     LatestVersion = $Version
     Packages = $packages

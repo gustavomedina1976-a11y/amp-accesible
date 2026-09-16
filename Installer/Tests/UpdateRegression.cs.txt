@@ -1,0 +1,53 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using GDMAmpAccessible.Persistence;
+
+internal static class Fixture
+{
+    public static string Root = "";
+    public static string App => Path.Combine(Root,"installed");
+    public static string Temp => Path.Combine(Root,"temp");
+    public static string Channel = "", Package = "";
+    public static int Downloads;
+    public static bool Corrupt;
+    public static void Check(bool ok,string message) { if(!ok)throw new Exception(message); }
+    public static async Task Main(string[] args)
+    {
+        Root=Path.GetFullPath(args[0]);Channel=args[1];Package=args[2];
+        Directory.CreateDirectory(App);Directory.CreateDirectory(Temp);
+        File.WriteAllText(Path.Combine(App,"update-channel.json"),"{\"ManifestUrl\":\"https://fixture.test/update-channel.json\"}");
+        var result=await UpdateService.CheckAndDownloadOnlineAsync();
+        if(UpdateService.CurrentVersion!="2.41.74")
+        {
+            Check(!result.Available&&result.Message.Contains("instalador completo")&&Downloads==0,"Old version downloaded incompatible package");
+            bool rejected=false;try{UpdateService.PreparePackage(Package);}catch(InvalidDataException){rejected=true;}
+            Check(rejected,"Wrong FromVersion accepted");
+            Console.WriteLine("PASS older version: full-installer fallback, no download, manual wrong-version package rejected.");return;
+        }
+        Check(result.Available&&Downloads==1&&result.PackagePath!=null,"2.41.74 cannot find 2.41.75");
+        var prepared=UpdateService.PreparePackage(result.PackagePath!);
+        Check(prepared.TargetVersion=="2.41.75","Package target");
+        File.WriteAllText(Path.Combine(Root,"apply-script.txt"),prepared.ScriptPath);
+        Corrupt=true;var bad=await UpdateService.CheckAndDownloadOnlineAsync();
+        Check(!bad.Available&&bad.Message.Contains("SHA-256"),"Invalid download hash accepted");
+        Console.WriteLine("PASS updater: exact previous version downloads one package, valid package prepared, corrupted SHA-256 rejected.");
+    }
+}
+internal sealed class FixtureHandler : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken token)
+    {
+        Fixture.Check(request.RequestUri!.Scheme=="https","HTTPS required");
+        byte[] bytes;
+        if(request.RequestUri.AbsoluteUri=="https://fixture.test/update-channel.json")bytes=File.ReadAllBytes(Fixture.Channel);
+        else
+        {
+            using var channel=JsonDocument.Parse(File.ReadAllText(Fixture.Channel));
+            string url=channel.RootElement.GetProperty("Packages")[0].GetProperty("Url").GetString()!;
+            Fixture.Check(request.RequestUri.AbsoluteUri==url&&url.EndsWith("Amp_Accessible_2.41.74_a_2.41.75.gdmupdate"),"Wrong package URL");
+            Fixture.Downloads++;bytes=File.ReadAllBytes(Fixture.Package);if(Fixture.Corrupt)bytes[0]^=1;
+        }
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new ByteArrayContent(bytes)});
+    }
+}
