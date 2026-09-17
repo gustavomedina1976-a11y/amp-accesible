@@ -1,3 +1,13 @@
+Amp Accessible 2.41.77 - Steve Vai Legacy Lead Pulido JAWS
+Base estable: 2.41.76 (a2eda336).
+- Validacion perceptiva con guitarra real: la 2.41.76 conserva sustain, cremosidad y caracter vocal; se detecto una leve concentracion de medios en acordes.
+- Ajuste exclusivo F32: Middle 6.2 -> 5.8 y Presence 5.4 -> 5.7.
+- Se conservan Gain 6.7, OutputPercent 39.9, Bass 6.4, Treble 6.0 y TS808 Gain 0.9 / Tone 4.6 / Level 6.2.
+- Gate, compresor, booster, Bad Horsie, delay y reverb Plate sin cambios.
+- F31 y todos los demas presets intactos. DSP, AudioProcessor, AmpModel, NAM, IR, master, acompanamiento, grabadora, looper, afinador, perfiles, Loopback y UpdateService intactos.
+- Grabacion real de referencia 2.41.76: 76.52 s, pico -1.655 dBFS, DSP maximo 7 %, 0 plazos excedidos, 0 clipping y 0 NaN/Infinity.
+- Publicacion: unico incremental Amp_Accessible_2.41.76_a_2.41.77.gdmupdate, mas Setup, Publicacion.zip y update-channel.json.
+
 Amp Accessible 2.41.76 - Steve Vai Legacy Lead Cremoso JAWS
 Base estable: 2.41.75 (d5dda55).
 - Ajuste exclusivo F32 Steve Vai Legacy Lead: Gain Legacy 6.2 -> 6.7; OutputPercent 44 -> 39.9 para conservar nivel y headroom, sin superar el valor local ya acordado. Unicos dos parametros de sonido modificados.
