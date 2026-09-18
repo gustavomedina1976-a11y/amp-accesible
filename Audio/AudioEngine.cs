@@ -77,6 +77,10 @@ internal sealed class AudioEngine : IDisposable
     private string? _meetDeviceId;
     private bool _meetEnabled;
     private int _selectedInputBufferIndex;
+    // 2.41.79: blindaje de perfiles de clase. Cuando esta activo, Input 1 queda reservado
+    // para voz e Input 2 para guitarra, incluso durante transiciones de perfil.
+    private int _classProfileRouteGuard;
+    private long _classProfileRouteCorrections;
 
     // 2.41.1: medidores de diagnóstico del modo dual. Sólo observan la señal;
     // no intervienen en ganancia, mezcla ni procesamiento DSP.
@@ -189,6 +193,8 @@ internal sealed class AudioEngine : IDisposable
     public int PlaybackLatencySamples => Volatile.Read(ref _playbackLatencySamples);
     public string? SessionDriverName => _sessionDriverName;
     public int SessionInputChannelIndex => Volatile.Read(ref _sessionInputChannelIndex);
+    public bool ClassProfileRouteGuardEnabled => Volatile.Read(ref _classProfileRouteGuard) != 0;
+    public long ClassProfileRouteCorrections => Interlocked.Read(ref _classProfileRouteCorrections);
     public int SessionDriverInputChannels => Volatile.Read(ref _sessionDriverInputChannels);
     public int SessionDriverOutputChannels => Volatile.Read(ref _sessionDriverOutputChannels);
     public float Guitar1RawPeak => Volatile.Read(ref _guitar1RawPeak);
@@ -659,7 +665,6 @@ internal sealed class AudioEngine : IDisposable
 
         int frames = asio.FramesPerBuffer;
         _sessionDriverName = driverName;
-        Volatile.Write(ref _sessionInputChannelIndex, twoGuitars ? 1 : inputChannelIndex);
         Volatile.Write(ref _sessionDriverInputChannels, asio.DriverInputChannelCount);
         Volatile.Write(ref _sessionDriverOutputChannels, asio.DriverOutputChannelCount);
         Volatile.Write(ref _playbackLatencySamples, asio.PlaybackLatency);
@@ -679,6 +684,10 @@ internal sealed class AudioEngine : IDisposable
         _meetEndpointOutput = new float[capacity * 8];
         _meetBytes = new byte[capacity * 8 * sizeof(float)];
         _selectedInputBufferIndex = twoGuitars ? 1 : inputChannelIndex;
+        if (!twoGuitars && ClassProfileRouteGuardEnabled && asio.DriverInputChannelCount >= 2)
+            _selectedInputBufferIndex = 1;
+        Volatile.Write(ref _sessionInputChannelIndex, _selectedInputBufferIndex);
+        Interlocked.Exchange(ref _classProfileRouteCorrections, 0);
         _outputProvider = outputProvider;
         _asio = asio;
         _processor.Reset();
@@ -817,8 +826,18 @@ internal sealed class AudioEngine : IDisposable
         }
     }
     private string RecorderContext() =>
-        $"driver={SessionDriverName}; activo={IsRunning}; buffer={ActualBufferSize}; callbacks={CallbackCount}; errores entrada={InputReadErrorCount}; DSP={DspErrorCount}; salida={OutputWriteErrorCount}; buffer={BufferErrorCount}; master={MasterOutputPeak}; guitarra1={Guitar1RawPeak}; guitarra2={Guitar2RawPeak}; voz={VoiceRawPeak}";
+        $"driver={SessionDriverName}; activo={IsRunning}; buffer={ActualBufferSize}; callbacks={CallbackCount}; errores entrada={InputReadErrorCount}; DSP={DspErrorCount}; salida={OutputWriteErrorCount}; buffer={BufferErrorCount}; master={MasterOutputPeak}; guitarra1={Guitar1RawPeak}; guitarra2={Guitar2RawPeak}; voz={VoiceRawPeak}; blindajeClase={ClassProfileRouteGuardEnabled}; correccionesRuta={ClassProfileRouteCorrections}";
 
+    public void ConfigureClassProfileRouteGuard(bool enabled)
+    {
+        Volatile.Write(ref _classProfileRouteGuard, enabled ? 1 : 0);
+        if (!enabled) return;
+        if (Volatile.Read(ref _sessionDriverInputChannels) >= 2)
+        {
+            Volatile.Write(ref _selectedInputBufferIndex, 1);
+            Volatile.Write(ref _sessionInputChannelIndex, 1);
+        }
+    }
     public void CancelPracticeRecording()
     {
         _practiceRecorder.Cancel();
@@ -1051,10 +1070,21 @@ internal sealed class AudioEngine : IDisposable
                 }
                 else
                 {
-                    AsioInputReader.ReadMono(e, _selectedInputBufferIndex, input, frames);
+                    int guitarInputIndex = Volatile.Read(ref _selectedInputBufferIndex);
+                    // 2.41.79: con un perfil de clase activo, Input 1 nunca puede convertirse
+                    // accidentalmente en entrada de guitarra. La correccion ocurre antes
+                    // de leer una sola muestra para el DSP de guitarra.
+                    if (ClassProfileRouteGuardEnabled && e.InputBuffers.Length >= 2 && guitarInputIndex != 1)
+                    {
+                        guitarInputIndex = 1;
+                        Volatile.Write(ref _selectedInputBufferIndex, 1);
+                        Volatile.Write(ref _sessionInputChannelIndex, 1);
+                        Interlocked.Increment(ref _classProfileRouteCorrections);
+                    }
+                    AsioInputReader.ReadMono(e, guitarInputIndex, input, frames);
                     // El canal 1 es el micrófono. Sólo se mezcla cuando la guitarra está en
                     // otra entrada; así nunca duplicamos una guitarra conectada al canal 1.
-                    if ((_processor.VoiceOnlyMode || _selectedInputBufferIndex != 0) && e.InputBuffers.Length > 0)
+                    if ((_processor.VoiceOnlyMode || guitarInputIndex != 0) && e.InputBuffers.Length > 0)
                     {
                         AsioInputReader.ReadMono(e, 0, voiceInput, frames);
                         UpdateHeldPeak(ref _voiceRawPeak, MeasurePeak(voiceInput, frames));

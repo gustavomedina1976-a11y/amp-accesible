@@ -1701,9 +1701,33 @@ public sealed class MainForm : Form, IMessageFilter
         SetStatus(finalMessage, voicemeeterError || (_meetOutputEnabled.Checked && !_engine.IsMeetOutputRunning && _engine.IsRunning));
     }
 
+    private bool PrepareSeparatedClassRoute(bool requiredForGuitar)
+    {
+        if (_inputCombo.Items.Count < 2)
+        {
+            _engine.ConfigureClassProfileRouteGuard(false);
+            if (requiredForGuitar)
+            {
+                SetStatus("Clase de Guitarra necesita Input 2 disponible. Se mantiene Modo Voz para impedir que el microfono de Input 1 entre en la cadena de guitarra.", true);
+                return false;
+            }
+            return true;
+        }
+
+        // Se fija primero el motor y despues la interfaz. Asi una transicion Ingles ->
+        // Guitarra nunca tiene un callback con Input 1 interpretado como guitarra.
+        _engine.ConfigureClassProfileRouteGuard(true);
+        _loadingAudioDeviceSelection = true;
+        try { _inputCombo.SelectedIndex = 1; }
+        finally { _loadingAudioDeviceSelection = false; }
+        _audioPreferences.GuitarInputIndex = 1;
+        SaveAudioDevicePreference();
+        return true;
+    }
     private void ApplyVoiceClassPreset()
     {
         if (_twoGuitarMode.Checked) _twoGuitarMode.Checked = false;
+        PrepareSeparatedClassRoute(requiredForGuitar: false);
         // Antes de silenciar el retorno para inglés, conservamos el último retorno
         // usado en clases de guitarra. Así volver a guitarra restaura exactamente
         // el valor que el usuario venía usando.
@@ -1806,6 +1830,7 @@ public sealed class MainForm : Form, IMessageFilter
     private void ApplyGuitarClassPreset()
     {
         if (_twoGuitarMode.Checked) _twoGuitarMode.Checked = false;
+        if (!PrepareSeparatedClassRoute(requiredForGuitar: true)) return;
         _applyingClassProfile = true;
         try
         {
@@ -1899,9 +1924,9 @@ public sealed class MainForm : Form, IMessageFilter
         _voiceEnabled.AccessibleDescription = "Activa la cadena de voz independiente. Para guitarra y voz simultáneas seleccione la entrada 2 como entrada de guitarra.";
         AddLabeledControl(table, "Micrófono:", _voiceEnabled);
 
-        _voiceOnlyMode.Text = "&Modo Voz / videollamadas: usar sólo el micrófono";
-        _voiceOnlyMode.AccessibleName = "Modo Voz para videollamadas";
-        _voiceOnlyMode.AccessibleDescription = "Silencia por completo guitarra, NAM, efectos, metrónomo, batería, bajo y piano. Sólo procesa la entrada 1 como micrófono para Zoom, Meet, Teams u otra aplicación.";
+        _voiceOnlyMode.Text = "&Modo solo voz manual: silenciar guitarra";
+        _voiceOnlyMode.AccessibleName = "Modo solo voz manual";
+        _voiceOnlyMode.AccessibleDescription = "Control manual avanzado. Los perfiles Clase de Ingles y Clase de Guitarra lo gestionan automaticamente; no es necesario tocarlo al cambiar de clase. Activado, silencia guitarra, NAM, efectos y acompanamiento y deja solo Input 1 como voz.";
         AddLabeledControl(table, "Modo de uso:", _voiceOnlyMode);
 
         _voiceClassPresetButton.Text = "Modo &Clase de Inglés";
@@ -1946,8 +1971,9 @@ public sealed class MainForm : Form, IMessageFilter
         AddLabeledControl(table, "Voz en mis auriculares, 0 a 150 por ciento:",
             ConfigureNumeric(_voiceMonitorLevel, "Nivel de voz en el monitoreo local"));
 
-        _meetOutputEnabled.Text = "Activar &salida virtual para videollamadas";
-        _meetOutputEnabled.AccessibleName = "Activar salida virtual para videollamadas";
+        _meetOutputEnabled.Text = "Activar &salida virtual avanzada para videollamadas";
+        _meetOutputEnabled.AccessibleName = "Activar salida virtual avanzada para videollamadas";
+        _meetOutputEnabled.AccessibleDescription = "Ruta manual para VB-CABLE, VoiceMeeter o casos especiales. Con Clase de Guitarra y Focusrite Loopback no es necesario activarla; el perfil usa Playback 1-2 directamente.";
         AddLabeledControl(table, "Salida para videollamadas:", _meetOutputEnabled);
 
         ConfigureCombo(_meetOutputCombo, "Dispositivo de salida para videollamadas",
@@ -3639,14 +3665,17 @@ public sealed class MainForm : Form, IMessageFilter
             if (!_applyingClassProfile)
             {
                 _audioPreferences.LastClassProfile = "Personalizado";
+                _engine.ConfigureClassProfileRouteGuard(false);
                 UpdateClassProfileStatus();
             }
             ScheduleParameterUpdate();
-            SetStatus(_voiceOnlyMode.Checked
-                ? "Modo Voz activado. Sólo se procesará el micrófono de la entrada 1; guitarra, NAM y acompañamiento quedan silenciados."
-                : "Modo Voz desactivado. Se restaura el funcionamiento normal de guitarra y micrófono.");
-        };
-        _voiceClassPresetButton.Click += (_, _) => ApplyVoiceClassPreset();
+            if (!_voiceOnlyMode.Checked && !_applyingClassProfile && _voiceEnabled.Checked && _inputCombo.SelectedIndex == 0)
+                SetStatus("Modo solo voz desactivado con Input 1 seleccionado como guitarra. Para usar voz y guitarra sin cruces, seleccione Input 2 o pulse Modo Clase de Guitarra.", true);
+            else
+                SetStatus(_voiceOnlyMode.Checked
+                    ? "Modo solo voz manual activado. Solo se procesara el microfono de la entrada 1; guitarra, NAM y acompanamiento quedan silenciados."
+                    : "Modo solo voz manual desactivado. Se restaura el funcionamiento normal de guitarra y microfono.");
+        };        _voiceClassPresetButton.Click += (_, _) => ApplyVoiceClassPreset();
         _guitarClassPresetButton.Click += (_, _) => ApplyGuitarClassPreset();
         _voiceMonitorLevel.ValueChanged += (_, _) =>
         {
@@ -5506,6 +5535,19 @@ public sealed class MainForm : Form, IMessageFilter
 
         try
         {
+            bool classRouteGuard = !_twoGuitarMode.Checked &&
+                (_audioPreferences.LastClassProfile == "Ingl\u00E9s" || _audioPreferences.LastClassProfile == "Guitarra");
+            if (_audioPreferences.LastClassProfile == "Guitarra" && _inputCombo.Items.Count < 2)
+                throw new InvalidOperationException("Clase de Guitarra necesita Input 2 disponible para mantener separadas voz y guitarra.");
+            if (classRouteGuard && _inputCombo.Items.Count >= 2 && _inputCombo.SelectedIndex != 1)
+            {
+                _loadingAudioDeviceSelection = true;
+                try { _inputCombo.SelectedIndex = 1; }
+                finally { _loadingAudioDeviceSelection = false; }
+                _audioPreferences.GuitarInputIndex = 1;
+                SaveAudioDevicePreference();
+            }
+            _engine.ConfigureClassProfileRouteGuard(classRouteGuard);
             UpdateParameters();
             string message = _engine.Start(driver, _twoGuitarMode.Checked ? 1 : _inputCombo.SelectedIndex, SelectedBufferSize);
             if (_meetOutputEnabled.Checked)
@@ -7652,6 +7694,7 @@ public sealed class MainForm : Form, IMessageFilter
             : _voiceOnlyMode.Checked
                 ? "Micrófono activo: entrada 1; ruta de guitarra ignorada"
                 : $"Entrada de guitarra: {input}");
+        text.AppendLine($"Blindaje de rutas de clase: {(_engine.ClassProfileRouteGuardEnabled ? "activo; Input 1 reservado para voz e Input 2 para guitarra" : "inactivo")}; autocorrecciones de ruta {_engine.ClassProfileRouteCorrections}.");
         if (_engine.SessionDriverInputChannels > 0 || _engine.SessionDriverOutputChannels > 0)
             text.AppendLine($"Canales del driver: {_engine.SessionDriverInputChannels} entradas, {_engine.SessionDriverOutputChannels} salidas");
         text.AppendLine($"Frecuencia de trabajo: {AudioEngine.SampleRate} Hz");

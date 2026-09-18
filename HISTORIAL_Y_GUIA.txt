@@ -1,3 +1,16 @@
+Amp Accessible 2.41.79 - Blindaje Perfiles Voz Guitarra JAWS
+Base estable: 2.41.78 (7c08c637).
+- Correccion de seguridad para la transicion Clase de Ingles -> Clase de Guitarra.
+- En perfiles de clase, Input 1 queda reservado para voz e Input 2 para guitarra antes de desactivar Modo Voz.
+- AudioEngine incorpora un segundo blindaje en tiempo real: si un estado heredado intenta usar Input 1 como guitarra durante un perfil de clase, corrige la ruta a Input 2 antes de leer muestras para el DSP.
+- Se agrega contador diagnostico de autocorrecciones de ruta y estado del blindaje.
+- Modo Voz / videollamadas pasa a llamarse Modo solo voz manual para dejar claro que los perfiles de clase lo gestionan automaticamente.
+- La salida virtual para videollamadas queda identificada como avanzada; con Clase de Guitarra + Focusrite Loopback no es necesario activarla.
+- No se modifica ningun preset, efecto, parametro tonal, NAM, IR, master, acompanamiento, grabadora, looper ni afinador.
+- FactoryPresetBank.cs queda byte a byte sin cambios respecto de 2.41.78.
+- UpdateService.cs queda intacto.
+- Publicacion: unico incremental Amp_Accessible_2.41.78_a_2.41.79.gdmupdate, mas Setup, Publicacion.zip y update-channel.json.
+
 Amp Accessible 2.41.78 - Steve Vai Legacy Lead Delay Equilibrado JAWS
 Base estable: 2.41.77 (8c209401).
 - Ajuste exclusivo F32 solicitado tras prueba con guitarra real: el delay estaba demasiado adelante.
