@@ -1,3 +1,16 @@
+Amp Accessible 2.41.81 - Triple Channel Classic Modern JAWS
+Base estable: 2.41.80 (1136bbfc).
+- El Canal 10 de 2.41.80 queda conservado como Triple Channel Classic, sin cambios tonales.
+- El identificador interno LeadTripleChannel mantiene el valor 9 para preservar escenas ya guardadas.
+- Nuevo Canal 11 Triple Channel Modern, AmpChannel 10, con un incremento moderado de saturacion.
+- Modern aumenta el drive principalmente en las etapas 2 y 3, con graves algo mas tensos y potencia 6L6 un poco mas comprimida.
+- La salida del Modern se compensa para que la diferencia percibida sea distorsion y respuesta, no solamente volumen.
+- F33 pasa a llamarse Triple Channel Classic y conserva exactamente Gain 6.3, Output 37, Bass 6.2, Middle 4.7, Treble 5.1 y Presence 5.0.
+- Nuevo F34 Triple Channel Modern: Gain 6.6, Output 35.5, Bass 6.0, Middle 4.5, Treble 5.2 y Presence 5.1.
+- F34 permanece seco: sin overdrive, booster, compresor, delay ni reverb, para evaluar el amplificador solo.
+- F31 y F32, perfiles de clase, NAM, IR, voz, Loopback y UpdateService quedan intactos.
+- Publicacion: unico incremental Amp_Accessible_2.41.80_a_2.41.81.gdmupdate, mas Setup, Publicacion.zip y update-channel.json.
+
 Amp Accessible 2.41.80 - Triple Channel Valvular Modern JAWS
 Base estable: 2.41.79 (c137db2c).
 - Nuevo Canal 10: Triple Channel Modern, high gain valvular, agregado como AmpChannel 9 sin renumerar modelos existentes.

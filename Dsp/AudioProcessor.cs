@@ -110,7 +110,8 @@ internal sealed class AudioProcessor : IDisposable
             new AmpModel(sampleRate, AmpChannel.CrunchClassA, 4f, 4.8f, 6f, 6f, 5.8f),
             new AmpModel(sampleRate, AmpChannel.LeadModern, 5f, 4.5f, 5.5f, 5.2f, 5.5f),
             new AmpModel(sampleRate, AmpChannel.LeadLegacy, 5f, 5f, 6.5f, 5f, 5.2f),
-            new AmpModel(sampleRate, AmpChannel.LeadTripleChannel, 5.8f, 6.2f, 4.8f, 5.2f, 5.0f)
+            new AmpModel(sampleRate, AmpChannel.LeadTripleChannel, 5.8f, 6.2f, 4.8f, 5.2f, 5.0f),
+            new AmpModel(sampleRate, AmpChannel.LeadTripleChannelModern, 6.2f, 6.0f, 4.6f, 5.2f, 5.1f)
         };
         _activeAmpIndex = 0;
         _effectsLoop = new EffectsLoop(sampleRate);
@@ -901,6 +902,7 @@ internal sealed class AudioProcessor : IDisposable
             _ampModels[(int)AmpChannel.LeadModern].Configure(AmpChannel.LeadModern, parameters.Gain,4.5f,5.5f,5.2f,5.5f);
             _ampModels[(int)AmpChannel.LeadLegacy].Configure(AmpChannel.LeadLegacy, parameters.Gain,5f,6.5f,5f,5.2f);
             _ampModels[(int)AmpChannel.LeadTripleChannel].Configure(AmpChannel.LeadTripleChannel, parameters.Gain,6.2f,4.8f,5.2f,5.0f);
+            _ampModels[(int)AmpChannel.LeadTripleChannelModern].Configure(AmpChannel.LeadTripleChannelModern, parameters.Gain,6.0f,4.6f,5.2f,5.1f);
         }
 
         if (first || previous.Channel != parameters.Channel)
