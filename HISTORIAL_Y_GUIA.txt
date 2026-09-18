@@ -1,3 +1,15 @@
+Amp Accessible 2.41.78 - Steve Vai Legacy Lead Delay Equilibrado JAWS
+Base estable: 2.41.77 (8c209401).
+- Ajuste exclusivo F32 solicitado tras prueba con guitarra real: el delay estaba demasiado adelante.
+- Delay Feedback: 25 % -> 21 %.
+- Delay Mix: 20 % -> 15 %.
+- Delay Time: 405 ms sin cambios.
+- Se conservan Middle 5.8, Presence 5.7, Gain 6.7, OutputPercent 39.9, Bass 6.4, Treble 6.0 y TS808 Gain 0.9 / Tone 4.6 / Level 6.2.
+- Reverb Plate, gate, compresor, booster y Bad Horsie sin cambios.
+- F31 y todos los demas presets intactos. DSP, AudioProcessor, AmpModel, NAM, IR, master, acompanamiento, grabadora, looper, afinador, perfiles, Loopback y UpdateService intactos.
+- Grabacion real de referencia 2.41.77: 112.928 s, pico -1.650 dBFS, DSP maximo 12 %, 0 plazos excedidos, 0 clipping y 0 NaN/Infinity.
+- Publicacion: unico incremental Amp_Accessible_2.41.77_a_2.41.78.gdmupdate, mas Setup, Publicacion.zip y update-channel.json.
+
 Amp Accessible 2.41.77 - Steve Vai Legacy Lead Pulido JAWS
 Base estable: 2.41.76 (a2eda336).
 - Validacion perceptiva con guitarra real: la 2.41.76 conserva sustain, cremosidad y caracter vocal; se detecto una leve concentracion de medios en acordes.
