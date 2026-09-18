@@ -12,7 +12,9 @@ public enum AmpChannel
     CrunchPlexi = 5,
     CrunchClassA = 6,
     LeadModern = 7,
-    LeadLegacy = 8
+    LeadLegacy = 8,
+    // 2.41.80: agregado al final para conservar compatibilidad con escenas antiguas.
+    LeadTripleChannel = 9
 }
 
 public enum PreEffectSlot

@@ -135,6 +135,11 @@ internal sealed class AmpModel
                 baseMidDb=2.8f; highPass=88f; lowPass=5700f; midFrequency=950f; preVoiceDb=2.8f; stageHighPass=105f; stage1LowPass=7600f; stage2LowPass=5700f; stage3LowPass=4700f; _makeup=.60f; break;
             case AmpChannel.LeadLegacy:
                 baseMidDb=4.8f; highPass=64f; lowPass=6100f; midFrequency=780f; preVoiceDb=2.2f; stageHighPass=82f; stage1LowPass=8300f; stage2LowPass=6200f; stage3LowPass=5100f; _makeup=.64f; break;
+            case AmpChannel.LeadTripleChannel:
+                // High gain 6L6 grande y abierto: graves profundos, medios menos apretados
+                // y filtrado progresivo entre etapas para evitar fizz digital.
+                baseMidDb=1.4f; highPass=58f; lowPass=6250f; midFrequency=720f; preVoiceDb=1.2f;
+                stageHighPass=86f; stage1LowPass=9000f; stage2LowPass=6800f; stage3LowPass=5550f; _makeup=.62f; break;
             default:
                 // Canal 3 revoceado como lead valvular cálido y cantado. Conserva
                 // definición pero evita el pico agresivo de medios-altos del JCM800 anterior.
@@ -156,7 +161,7 @@ internal sealed class AmpModel
         {
             AmpChannel.CleanTwin => 760f,
             AmpChannel.CrunchBritish => 980f,
-            AmpChannel.CleanBoutique => 620f, AmpChannel.CleanClassA => 1100f, AmpChannel.CrunchPlexi => 850f, AmpChannel.CrunchClassA => 1150f, AmpChannel.LeadModern => 1050f, AmpChannel.LeadLegacy => 800f,
+            AmpChannel.CleanBoutique => 620f, AmpChannel.CleanClassA => 1100f, AmpChannel.CrunchPlexi => 850f, AmpChannel.CrunchClassA => 1150f, AmpChannel.LeadModern => 1050f, AmpChannel.LeadLegacy => 800f, AmpChannel.LeadTripleChannel => 720f,
             _ => 860f
         };
         _preVoice.SetPeak(_sampleRate, preVoiceFrequency, 0.78f, preVoiceDb);
@@ -177,19 +182,27 @@ internal sealed class AmpModel
         {
             AmpChannel.CleanTwin => 72f,
             AmpChannel.CrunchBritish => 82f,
+            AmpChannel.LeadTripleChannel => 72f,
             _ => 76f
         };
         float cabinetLowPass = channel switch
         {
             AmpChannel.CleanTwin => 6500f,
             AmpChannel.CrunchBritish => 5900f,
+            AmpChannel.LeadTripleChannel => 6100f,
             _ => 5600f
         };
-        float cabinetResonanceFrequency = channel == AmpChannel.CleanTwin ? 105f : 118f;
+        float cabinetResonanceFrequency = channel switch
+        {
+            AmpChannel.CleanTwin => 105f,
+            AmpChannel.LeadTripleChannel => 108f,
+            _ => 118f
+        };
         float cabinetResonanceDb = channel switch
         {
             AmpChannel.CleanTwin => 2.0f,
             AmpChannel.CrunchBritish => 3.0f,
+            AmpChannel.LeadTripleChannel => 4.1f,
             _ => 3.3f
         };
         _cabHighPass.SetHighPass(_sampleRate, cabinetHighPass, 0.8f);
@@ -231,6 +244,7 @@ internal sealed class AmpModel
             AmpChannel.CleanBoutique => 0.145f,
             AmpChannel.CleanClassA => 0.12f,
             AmpChannel.CrunchBritish or AmpChannel.CrunchPlexi or AmpChannel.CrunchClassA => 0.26f,
+            AmpChannel.LeadTripleChannel => 0.235f,
             _ => 0.19f
         };
         float sag = 1f / (1f + (_sagEnvelope * sagAmount));
@@ -308,6 +322,30 @@ internal sealed class AmpModel
                 // Un poco de señal de la primera etapa conserva ataque y evita la compresión tipo fuzz.
                 return ((stage1 * 0.22f) + (stage2 * 0.78f)) * sag;
             }
+            case AmpChannel.LeadTripleChannel:
+            {
+                // Tres etapas de previo asimetricas, con menos compresion por etapa que
+                // LeadModern. Se conserva parte de las etapas tempranas para que la pua
+                // siga teniendo relieve aun con bastante ganancia.
+                float drive1 = 1.12f + (_gainNormalized * 2.18f);
+                float stage1 = TriodeStageOpen(x * drive1, 0.132f, 1.045f);
+                stage1 = StageDcBlock(stage1, ref _stage1DcInput, ref _stage1DcOutput);
+                stage1 = _stage1LowPass.Process(stage1);
+
+                float drive2 = 1.06f + (_gainNormalized * 1.82f);
+                float stage2 = TriodeStageOpen(_stage2HighPass.Process(stage1) * drive2, -0.108f, 1.035f);
+                stage2 = StageDcBlock(stage2, ref _stage2DcInput, ref _stage2DcOutput);
+                stage2 = _stage2LowPass.Process(stage2);
+
+                float drive3 = 1.00f + (_gainNormalized * 1.24f);
+                float stage3 = TriodeStageOpen(stage2 * drive3, 0.058f, 1.018f);
+                stage3 = StageDcBlock(stage3, ref _stage3DcInput, ref _stage3DcOutput);
+                stage3 = _stage3LowPass.Process(stage3);
+
+                float preamp = (stage1 * 0.10f) + (stage2 * 0.34f) + (stage3 * 0.56f);
+                float power = ProcessLeadPowerStage(preamp);
+                return ((preamp * 0.44f) + (power * 0.56f)) * sag;
+            }
             default:
             {
                 // Lead de alta ganancia más valvular: menos drive por etapa, más mezcla
@@ -340,17 +378,27 @@ internal sealed class AmpModel
 
     private float ProcessLeadPowerStage(float input)
     {
-        // Compresión dependiente de envolvente, similar a una etapa de potencia empujada.
-        // Los coeficientes son deliberadamente lentos para no bombear con cada ciclo.
-        float target = MathF.Min(1.5f, MathF.Abs(input) * 1.75f);
-        float coefficient = target > _leadPowerEnvelope ? 0.0035f : 0.00032f;
+        // Compresion dependiente de envolvente, similar a una etapa de potencia empujada.
+        // Triple Channel usa una respuesta 6L6 algo mas abierta: mas golpe y menos
+        // aplastamiento sostenido que LeadModern, sin perder el sag.
+        bool tripleChannel = _channel == AmpChannel.LeadTripleChannel;
+        float targetScale = tripleChannel ? 1.62f : 1.75f;
+        float target = MathF.Min(1.5f, MathF.Abs(input) * targetScale);
+        float attack = tripleChannel ? 0.0029f : 0.0035f;
+        float release = tripleChannel ? 0.00027f : 0.00032f;
+        float coefficient = target > _leadPowerEnvelope ? attack : release;
         _leadPowerEnvelope = FastDspMath.FlushDenormal(
             _leadPowerEnvelope + ((target - _leadPowerEnvelope) * coefficient));
 
-        float dynamicDrive = 1.10f + (_gainNormalized * 0.42f);
-        float compression = 1f / (1f + (_leadPowerEnvelope * 0.11f));
+        float dynamicDrive = tripleChannel
+            ? 1.16f + (_gainNormalized * 0.50f)
+            : 1.10f + (_gainNormalized * 0.42f);
+        float compressionAmount = tripleChannel ? 0.082f : 0.11f;
+        float compression = 1f / (1f + (_leadPowerEnvelope * compressionAmount));
         float driven = input * dynamicDrive * compression;
-        float saturated = TriodeStage(driven, 0.035f, 1.015f);
+        float saturated = tripleChannel
+            ? TriodeStageOpen(driven, 0.028f, 1.010f)
+            : TriodeStage(driven, 0.035f, 1.015f);
         return StageDcBlock(saturated, ref _leadPowerDcInput, ref _leadPowerDcOutput);
     }
 
@@ -363,6 +411,17 @@ internal sealed class AmpModel
         // Compresión gradual de los extremos, no recorte plano. Mantiene la pendiente
         // cerca de cero y genera armónicos pares por la polarización asimétrica.
         float correction = 1f + (0.16f * MathF.Abs(output));
+        return output / correction;
+    }
+
+    private static float TriodeStageOpen(float input, float bias, float curvature)
+    {
+        float biasedInput = (input + bias) * curvature;
+        float idle = FastDspMath.SoftClip(bias * curvature);
+        float output = FastDspMath.SoftClip(biasedInput) - idle;
+
+        // Menos correccion que TriodeStage: conserva mas pendiente y dinamica.
+        float correction = 1f + (0.105f * MathF.Abs(output));
         return output / correction;
     }
 

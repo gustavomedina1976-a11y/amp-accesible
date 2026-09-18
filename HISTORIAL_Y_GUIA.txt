@@ -1,3 +1,15 @@
+Amp Accessible 2.41.80 - Triple Channel Valvular Modern JAWS
+Base estable: 2.41.79 (c137db2c).
+- Nuevo Canal 10: Triple Channel Modern, high gain valvular, agregado como AmpChannel 9 sin renumerar modelos existentes.
+- Referencia de diseno: respuesta grande y abierta tipo Vintage Electric Nu-Twin Triple Channel / familia Rectifier, sin pretender copiar un circuito exacto.
+- Tres etapas de previo asimetricas con filtrado progresivo y menor aplastamiento por etapa para conservar ataque y dinamica.
+- Etapa de potencia dedicada con sag y compresion dependiente de envolvente, ajustada para sensacion 6L6.
+- Gabinete interno del nuevo canal con resonancia grave mas profunda; se recomienda probar tambien el IR Eminence Governor.
+- Nuevo preset F33 Triple Channel Modern: Gain 6.3, Bass 6.2, Middle 4.7, Treble 5.1, Presence 5.0, Output 37.
+- F33 se entrega casi seco: sin overdrive, booster, compresor, delay ni reverb, para evaluar primero la distorsion del amplificador.
+- F31 y F32 permanecen intactos; perfiles de clase 2.41.79, NAM, IR, voz, Loopback y UpdateService sin cambios.
+- Publicacion: unico incremental Amp_Accessible_2.41.79_a_2.41.80.gdmupdate, mas Setup, Publicacion.zip y update-channel.json.
+
 Amp Accessible 2.41.79 - Blindaje Perfiles Voz Guitarra JAWS
 Base estable: 2.41.78 (7c08c637).
 - Correccion de seguridad para la transicion Clase de Ingles -> Clase de Guitarra.
