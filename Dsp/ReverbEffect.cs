@@ -324,18 +324,16 @@ internal sealed class ReverbEffect
             default: // Spring
                 _springTankLeft.Configure(decay, tone, userDamping, userDiffusion);
                 _springTankRight.Configure(decay, tone, userDamping, userDiffusion);
-                // Resorte: más ataque metálico y drip, con una imagen más centrada que
-                // los espacios acústicos grandes.
+                // 2.41.83: referencia real del tanque del Triple Channel. El primer
+                // rebote llega casi inmediato, la cola queda menos difusa y más metálica.
                 feedbackBase = 0.64f; feedbackRange = 0.20f;
-                damping = 0.47f - tone * 0.22f + userDamping * 0.08f;
-                _diffusionAmount = Math.Clamp(userDiffusion * 0.38f, 0.14f, 0.44f);
+                damping = 0.45f - tone * 0.20f + userDamping * 0.08f;
+                _diffusionAmount = Math.Clamp(userDiffusion * 0.30f, 0.10f, 0.34f);
                 _activeCombs = 5; _allPassPasses = 1;
-                _earlyReflectionGain = 0.27f; _wetOutputGain = 0.98f; _stereoWidth = 0.52f;
-                _tailSmoothing = 0.045f; _springAmount = 0.74f; _plateSheen = 0f; _shimmerAmount = 0f;
-                // Un tanque físico devuelve el primer golpe casi de inmediato. El predelay
-                // largo ocultaba justamente el rebote que se percibe al atacar una cuerda.
-                effectivePreDelay = Math.Clamp(preDelayMs * 0.22f, 1.5f, 9f);
-                earlyTap1Ms = 22f; earlyTap2Ms = 37f; earlyTap3Ms = 59f;
+                _earlyReflectionGain = 0.34f; _wetOutputGain = 1.02f; _stereoWidth = 0.46f;
+                _tailSmoothing = 0.025f; _springAmount = 0.86f; _plateSheen = 0f; _shimmerAmount = 0f;
+                effectivePreDelay = Math.Clamp(preDelayMs * 0.10f, 0.5f, 4f);
+                earlyTap1Ms = 7f; earlyTap2Ms = 16f; earlyTap3Ms = 31f;
                 break;
         }
 
@@ -355,7 +353,7 @@ internal sealed class ReverbEffect
                 ReverbCharacter.Church => 64f,
                 ReverbCharacter.Shimmer => 42f,
                 ReverbCharacter.Cathedral => 88f,
-                _ => 4f
+                _ => 1f
             };
         }
 
@@ -641,16 +639,17 @@ internal sealed class ReverbEffect
 
         public SpringTank(int rate, CombFilter[] combs, float tuning)
         {
-            _highPass = Coefficient(120f, rate);
-            _fastAttack = TimeCoefficient(0.0015f, rate);
-            _fastRelease = TimeCoefficient(0.025f, rate);
-            _slowAttack = TimeCoefficient(0.020f, rate);
-            _slowRelease = TimeCoefficient(0.120f, rate);
-            _cooldownLength = Math.Max(1, (int)(rate * 0.080f));
+            _highPass = Coefficient(135f, rate);
+            _fastAttack = TimeCoefficient(0.0013f, rate);
+            _fastRelease = TimeCoefficient(0.030f, rate);
+            _slowAttack = TimeCoefficient(0.022f, rate);
+            _slowRelease = TimeCoefficient(0.145f, rate);
+            _cooldownLength = Math.Max(1, (int)(rate * 0.060f));
             _paths = new[] {
-                new SpringPath(rate, combs[0].SpringBuffer, 0.57f * tuning, 0.93f),
-                new SpringPath(rate, combs[2].SpringBuffer, 0.66f * tuning, 1.07f),
-                new SpringPath(rate, combs[5].SpringBuffer, 0.73f * tuning, 0.87f) };
+                // Tres recorridos deliberadamente desiguales, como un tanque de tres resortes.
+                new SpringPath(rate, combs[0].SpringBuffer, 0.54f * tuning, 0.90f),
+                new SpringPath(rate, combs[2].SpringBuffer, 0.68f * tuning, 1.03f),
+                new SpringPath(rate, combs[5].SpringBuffer, 0.80f * tuning, 0.82f) };
         }
 
         public void Configure(float decay, float tone, float damping, float diffusion)
@@ -675,10 +674,10 @@ internal sealed class ReverbEffect
                 _phaseVariation = ((_strike & 1023) / 1023f - 0.5f) * 0.008f;
                 _cooldown = _cooldownLength;
             }
-            float drive = FastDspMath.SoftClip(body * (0.55f + _attack * 0.22f));
-            float tail = _paths[0].Process(drive, _phaseVariation * _attack)
-                - _paths[1].Process(drive, -_phaseVariation * _attack) * 0.72f
-                + _paths[2].Process(drive, _phaseVariation * _attack) * 0.53f;
+            float drive = FastDspMath.SoftClip(body * (0.52f + _attack * 0.28f));
+            float tail = _paths[0].Process(drive, _phaseVariation * _attack) * 1.04f
+                - _paths[1].Process(drive, -_phaseVariation * _attack) * 0.76f
+                + _paths[2].Process(drive, _phaseVariation * _attack) * 0.56f;
 
             _earlyLow = FastDspMath.FlushDenormal(_earlyLow + (early - _earlyLow) * _highPass);
             float reflection = early - _earlyLow;
@@ -689,7 +688,7 @@ internal sealed class ReverbEffect
                 reflection = output;
             }
             // El primer retorno se dispersa para evitar un eco slapback separado.
-            return tail * 0.52f + reflection * (0.50f + _attack * 0.10f);
+            return tail * 0.58f + reflection * (0.62f + _attack * 0.16f);
         }
 
         public void Reset()
@@ -724,12 +723,13 @@ internal sealed class ReverbEffect
 
         public void Configure(float decay, float tone, float damping, float diffusion)
         {
-            // Cola compacta: el tiempo efectivo incluye las perdidas por vuelta.
-            float decaySeconds = 0.45f + decay * 0.65f;
+            // La toma real del Mi grave conserva cola de resorte durante alrededor de
+            // 3 a 4 segundos con el ajuste medio. Decay 48 % queda cerca de 3,5 s.
+            float decaySeconds = 1.00f + decay * 5.20f;
             _feedback = MathF.Pow(0.001f, _delay.Length / (_rate * decaySeconds));
-            float cutoff = (2300f + tone * 2800f - damping * 1300f) * _lossScale;
+            float cutoff = (2100f + tone * 3200f - damping * 1200f) * _lossScale;
             _loss = 1f - MathF.Exp(-2f * MathF.PI * cutoff / _rate);
-            _dispersionCoefficient = _dispersionBase + (diffusion - 0.5f) * 0.06f;
+            _dispersionCoefficient = _dispersionBase + (diffusion - 0.5f) * 0.045f;
         }
 
         public float Process(float input, float variation)

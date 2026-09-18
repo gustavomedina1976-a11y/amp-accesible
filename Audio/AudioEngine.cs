@@ -1646,12 +1646,18 @@ internal sealed class AudioEngine : IDisposable
         switch (_processor.CurrentChannel)
         {
             case AmpChannel.CleanTwin:
+            case AmpChannel.CleanBoutique:
+            case AmpChannel.CleanClassA:
+            case AmpChannel.TripleChannelClean:
                 UpdateMaximum(ref _maxDspLoadClean, loadPercent);
                 break;
             case AmpChannel.CrunchBritish:
+            case AmpChannel.CrunchPlexi:
+            case AmpChannel.CrunchClassA:
+            case AmpChannel.TripleChannelCleanCrunch:
                 UpdateMaximum(ref _maxDspLoadCrunch, loadPercent);
                 break;
-            case AmpChannel.LeadJcm800:
+            default:
                 UpdateMaximum(ref _maxDspLoadLead, loadPercent);
                 break;
         }

@@ -16,7 +16,10 @@ public enum AmpChannel
     // 2.41.80: el valor 9 se conserva para que escenas anteriores sigan cargando igual.
     LeadTripleChannel = 9,
     // 2.41.81: modo Modern nuevo, agregado al final sin renumerar nada existente.
-    LeadTripleChannelModern = 10
+    LeadTripleChannelModern = 10,
+    // 2.41.83: referencias del canal limpio real del Triple Channel.
+    TripleChannelClean = 11,
+    TripleChannelCleanCrunch = 12
 }
 
 public enum PreEffectSlot

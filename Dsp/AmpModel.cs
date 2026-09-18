@@ -140,10 +140,20 @@ internal sealed class AmpModel
                 baseMidDb=1.4f; highPass=58f; lowPass=6250f; midFrequency=720f; preVoiceDb=1.2f;
                 stageHighPass=86f; stage1LowPass=9000f; stage2LowPass=6800f; stage3LowPass=5550f; _makeup=.62f; break;
             case AmpChannel.LeadTripleChannelModern:
-                // Modern: un poco mas de saturacion, graves algo mas tensos y salida
-                // compensada para que el aumento de distorsion no sea solo mas volumen.
-                baseMidDb=1.1f; highPass=62f; lowPass=6200f; midFrequency=740f; preVoiceDb=1.55f;
-                stageHighPass=92f; stage1LowPass=8800f; stage2LowPass=6500f; stage3LowPass=5250f; _makeup=.58f; break;
+                // 2.41.83: la toma real mostro mas ataque y medios-altos que Classic,
+                // aun con menor nivel. Se aprietan graves sin aumentar la compresion.
+                baseMidDb=1.3f; highPass=66f; lowPass=6350f; midFrequency=860f; preVoiceDb=1.9f;
+                stageHighPass=96f; stage1LowPass=9000f; stage2LowPass=6700f; stage3LowPass=5400f; _makeup=.55f; break;
+            case AmpChannel.TripleChannelClean:
+                // Limpio grande y con cuerpo, guiado por la toma real: mantiene headroom
+                // pero refuerza medios-graves y el empuje de la 6L6 sin volverlo oscuro.
+                baseMidDb=1.4f; highPass=46f; lowPass=8500f; midFrequency=690f; preVoiceDb=1.35f;
+                stageHighPass=54f; stage1LowPass=11600f; stage2LowPass=9000f; stage3LowPass=8000f; _makeup=.92f; break;
+            case AmpChannel.TripleChannelCleanCrunch:
+                // Modo Crunch del canal limpio: densidad armonica en medios-altos sin
+                // llegar a la compresion ni a la ganancia de Classic.
+                baseMidDb=1.8f; highPass=58f; lowPass=8100f; midFrequency=980f; preVoiceDb=1.9f;
+                stageHighPass=76f; stage1LowPass=10400f; stage2LowPass=8000f; stage3LowPass=7000f; _makeup=.73f; break;
             default:
                 // Canal 3 revoceado como lead valvular cálido y cantado. Conserva
                 // definición pero evita el pico agresivo de medios-altos del JCM800 anterior.
@@ -165,7 +175,7 @@ internal sealed class AmpModel
         {
             AmpChannel.CleanTwin => 760f,
             AmpChannel.CrunchBritish => 980f,
-            AmpChannel.CleanBoutique => 620f, AmpChannel.CleanClassA => 1100f, AmpChannel.CrunchPlexi => 850f, AmpChannel.CrunchClassA => 1150f, AmpChannel.LeadModern => 1050f, AmpChannel.LeadLegacy => 800f, AmpChannel.LeadTripleChannel => 720f, AmpChannel.LeadTripleChannelModern => 760f,
+            AmpChannel.CleanBoutique => 620f, AmpChannel.CleanClassA => 1100f, AmpChannel.CrunchPlexi => 850f, AmpChannel.CrunchClassA => 1150f, AmpChannel.LeadModern => 1050f, AmpChannel.LeadLegacy => 800f, AmpChannel.LeadTripleChannel => 720f, AmpChannel.LeadTripleChannelModern => 900f, AmpChannel.TripleChannelClean => 720f, AmpChannel.TripleChannelCleanCrunch => 1050f,
             _ => 860f
         };
         _preVoice.SetPeak(_sampleRate, preVoiceFrequency, 0.78f, preVoiceDb);
@@ -187,7 +197,9 @@ internal sealed class AmpModel
             AmpChannel.CleanTwin => 72f,
             AmpChannel.CrunchBritish => 82f,
             AmpChannel.LeadTripleChannel => 72f,
-            AmpChannel.LeadTripleChannelModern => 74f,
+            AmpChannel.LeadTripleChannelModern => 76f,
+            AmpChannel.TripleChannelClean => 68f,
+            AmpChannel.TripleChannelCleanCrunch => 74f,
             _ => 76f
         };
         float cabinetLowPass = channel switch
@@ -195,14 +207,18 @@ internal sealed class AmpModel
             AmpChannel.CleanTwin => 6500f,
             AmpChannel.CrunchBritish => 5900f,
             AmpChannel.LeadTripleChannel => 6100f,
-            AmpChannel.LeadTripleChannelModern => 6000f,
+            AmpChannel.LeadTripleChannelModern => 6150f,
+            AmpChannel.TripleChannelClean => 6700f,
+            AmpChannel.TripleChannelCleanCrunch => 6400f,
             _ => 5600f
         };
         float cabinetResonanceFrequency = channel switch
         {
             AmpChannel.CleanTwin => 105f,
             AmpChannel.LeadTripleChannel => 108f,
-            AmpChannel.LeadTripleChannelModern => 112f,
+            AmpChannel.LeadTripleChannelModern => 114f,
+            AmpChannel.TripleChannelClean => 100f,
+            AmpChannel.TripleChannelCleanCrunch => 108f,
             _ => 118f
         };
         float cabinetResonanceDb = channel switch
@@ -210,7 +226,9 @@ internal sealed class AmpModel
             AmpChannel.CleanTwin => 2.0f,
             AmpChannel.CrunchBritish => 3.0f,
             AmpChannel.LeadTripleChannel => 4.1f,
-            AmpChannel.LeadTripleChannelModern => 3.9f,
+            AmpChannel.LeadTripleChannelModern => 3.6f,
+            AmpChannel.TripleChannelClean => 3.0f,
+            AmpChannel.TripleChannelCleanCrunch => 3.0f,
             _ => 3.3f
         };
         _cabHighPass.SetHighPass(_sampleRate, cabinetHighPass, 0.8f);
@@ -253,7 +271,9 @@ internal sealed class AmpModel
             AmpChannel.CleanClassA => 0.12f,
             AmpChannel.CrunchBritish or AmpChannel.CrunchPlexi or AmpChannel.CrunchClassA => 0.26f,
             AmpChannel.LeadTripleChannel => 0.235f,
-            AmpChannel.LeadTripleChannelModern => 0.245f,
+            AmpChannel.LeadTripleChannelModern => 0.205f,
+            AmpChannel.TripleChannelClean => 0.105f,
+            AmpChannel.TripleChannelCleanCrunch => 0.175f,
             _ => 0.19f
         };
         float sag = 1f / (1f + (_sagEnvelope * sagAmount));
@@ -264,6 +284,7 @@ internal sealed class AmpModel
             case AmpChannel.CleanTwin:
             case AmpChannel.CleanBoutique:
             case AmpChannel.CleanClassA:
+            case AmpChannel.TripleChannelClean:
             {
                 float drive1;
                 float bias;
@@ -272,7 +293,18 @@ internal sealed class AmpModel
                 float blendScale;
                 float stage2Drive;
 
-                if (_channel == AmpChannel.CleanBoutique)
+                if (_channel == AmpChannel.TripleChannelClean)
+                {
+                    // La referencia real tiene la mayor cresta dinamica de las cuatro
+                    // tomas. La segunda etapa entra tarde y en poca proporcion.
+                    drive1 = 0.92f + (_gainNormalized * 1.05f);
+                    bias = 0.090f;
+                    softness = 1.045f;
+                    blendStart = 0.58f;
+                    blendScale = 1.15f;
+                    stage2Drive = 0.50f;
+                }
+                else if (_channel == AmpChannel.CleanBoutique)
                 {
                     // Más cuerpo y compresión valvular; conserva headroom a Gain bajo.
                     drive1 = 1.02f + (_gainNormalized * 1.28f);
@@ -305,14 +337,35 @@ internal sealed class AmpModel
                 stage1 = StageDcBlock(stage1, ref _stage1DcInput, ref _stage1DcOutput);
                 stage1 = _stage1LowPass.Process(stage1);
 
-                float maxBlend = _channel == AmpChannel.CleanBoutique ? 0.58f : 0.48f;
+                float maxBlend = _channel == AmpChannel.CleanBoutique ? 0.58f : _channel == AmpChannel.TripleChannelClean ? 0.34f : 0.48f;
                 float blend = Math.Clamp((_gainNormalized - blendStart) * blendScale, 0f, maxBlend);
                 float stage2 = TriodeStage(_stage2HighPass.Process(stage1) * (1.02f + _gainNormalized * stage2Drive),
-                    _channel == AmpChannel.CleanBoutique ? -0.060f : -0.045f,
-                    _channel == AmpChannel.CleanBoutique ? 1.10f : 1.02f);
+                    _channel == AmpChannel.CleanBoutique ? -0.060f : _channel == AmpChannel.TripleChannelClean ? -0.035f : -0.045f,
+                    _channel == AmpChannel.CleanBoutique ? 1.10f : _channel == AmpChannel.TripleChannelClean ? 1.055f : 1.02f);
                 stage2 = StageDcBlock(stage2, ref _stage2DcInput, ref _stage2DcOutput);
                 stage2 = _stage2LowPass.Process(stage2);
                 return ((stage1 * (1f - blend)) + (stage2 * blend)) * sag;
+            }
+            case AmpChannel.TripleChannelCleanCrunch:
+            {
+                // Crunch del canal limpio: dos etapas principales y una tercera suave.
+                // Se busca compresion armonica, no la saturacion cerrada del canal Classic.
+                float drive1 = 1.05f + (_gainNormalized * 1.85f);
+                float stage1 = TriodeStageOpen(x * drive1, 0.115f, 1.045f);
+                stage1 = StageDcBlock(stage1, ref _stage1DcInput, ref _stage1DcOutput);
+                stage1 = _stage1LowPass.Process(stage1);
+
+                float drive2 = 1.02f + (_gainNormalized * 1.45f);
+                float stage2 = TriodeStage(_stage2HighPass.Process(stage1) * drive2, -0.078f, 1.035f);
+                stage2 = StageDcBlock(stage2, ref _stage2DcInput, ref _stage2DcOutput);
+                stage2 = _stage2LowPass.Process(stage2);
+
+                float drive3 = 0.92f + (_gainNormalized * 0.72f);
+                float stage3 = TriodeStageOpen(stage2 * drive3, 0.040f, 1.012f);
+                stage3 = StageDcBlock(stage3, ref _stage3DcInput, ref _stage3DcOutput);
+                stage3 = _stage3LowPass.Process(stage3);
+
+                return ((stage1 * 0.18f) + (stage2 * 0.58f) + (stage3 * 0.24f)) * sag;
             }
             case AmpChannel.CrunchBritish:
             case AmpChannel.CrunchPlexi:
@@ -357,26 +410,27 @@ internal sealed class AmpModel
             }
             case AmpChannel.LeadTripleChannelModern:
             {
-                // Misma familia que Classic, con un incremento moderado de drive en las
-                // etapas 2 y 3. Se conserva mezcla de etapas tempranas para evitar fuzz.
-                float drive1 = 1.18f + (_gainNormalized * 2.38f);
-                float stage1 = TriodeStageOpen(x * drive1, 0.138f, 1.050f);
+                // Referencia real: mas saturacion que Classic, pero tambien mas cresta
+                // dinamica. El drive adicional queda en previo y se reduce el aplastamiento
+                // de potencia para conservar la pua y el contenido de 1 a 2 kHz.
+                float drive1 = 1.16f + (_gainNormalized * 2.34f);
+                float stage1 = TriodeStageOpen(x * drive1, 0.136f, 1.048f);
                 stage1 = StageDcBlock(stage1, ref _stage1DcInput, ref _stage1DcOutput);
                 stage1 = _stage1LowPass.Process(stage1);
 
-                float drive2 = 1.10f + (_gainNormalized * 2.06f);
-                float stage2 = TriodeStageOpen(_stage2HighPass.Process(stage1) * drive2, -0.112f, 1.040f);
+                float drive2 = 1.12f + (_gainNormalized * 2.24f);
+                float stage2 = TriodeStageOpen(_stage2HighPass.Process(stage1) * drive2, -0.110f, 1.038f);
                 stage2 = StageDcBlock(stage2, ref _stage2DcInput, ref _stage2DcOutput);
                 stage2 = _stage2LowPass.Process(stage2);
 
-                float drive3 = 1.03f + (_gainNormalized * 1.42f);
-                float stage3 = TriodeStageOpen(stage2 * drive3, 0.060f, 1.022f);
+                float drive3 = 1.05f + (_gainNormalized * 1.55f);
+                float stage3 = TriodeStageOpen(stage2 * drive3, 0.058f, 1.020f);
                 stage3 = StageDcBlock(stage3, ref _stage3DcInput, ref _stage3DcOutput);
                 stage3 = _stage3LowPass.Process(stage3);
 
-                float preamp = (stage1 * 0.07f) + (stage2 * 0.29f) + (stage3 * 0.64f);
+                float preamp = (stage1 * 0.10f) + (stage2 * 0.34f) + (stage3 * 0.56f);
                 float power = ProcessLeadPowerStage(preamp);
-                return ((preamp * 0.38f) + (power * 0.62f)) * sag;
+                return ((preamp * 0.48f) + (power * 0.52f)) * sag;
             }
             default:
             {
@@ -415,10 +469,10 @@ internal sealed class AmpModel
         // aplastamiento sostenido que LeadModern, sin perder el sag.
         bool tripleClassic = _channel == AmpChannel.LeadTripleChannel;
         bool tripleModern = _channel == AmpChannel.LeadTripleChannelModern;
-        float targetScale = tripleClassic ? 1.62f : tripleModern ? 1.70f : 1.75f;
+        float targetScale = tripleClassic ? 1.62f : tripleModern ? 1.60f : 1.75f;
         float target = MathF.Min(1.5f, MathF.Abs(input) * targetScale);
-        float attack = tripleClassic ? 0.0029f : tripleModern ? 0.0032f : 0.0035f;
-        float release = tripleClassic ? 0.00027f : tripleModern ? 0.00030f : 0.00032f;
+        float attack = tripleClassic ? 0.0029f : tripleModern ? 0.0027f : 0.0035f;
+        float release = tripleClassic ? 0.00027f : tripleModern ? 0.00025f : 0.00032f;
         float coefficient = target > _leadPowerEnvelope ? attack : release;
         _leadPowerEnvelope = FastDspMath.FlushDenormal(
             _leadPowerEnvelope + ((target - _leadPowerEnvelope) * coefficient));
@@ -426,15 +480,15 @@ internal sealed class AmpModel
         float dynamicDrive = tripleClassic
             ? 1.16f + (_gainNormalized * 0.50f)
             : tripleModern
-                ? 1.22f + (_gainNormalized * 0.58f)
+                ? 1.20f + (_gainNormalized * 0.64f)
                 : 1.10f + (_gainNormalized * 0.42f);
-        float compressionAmount = tripleClassic ? 0.082f : tripleModern ? 0.095f : 0.11f;
+        float compressionAmount = tripleClassic ? 0.082f : tripleModern ? 0.064f : 0.11f;
         float compression = 1f / (1f + (_leadPowerEnvelope * compressionAmount));
         float driven = input * dynamicDrive * compression;
         float saturated = tripleClassic
             ? TriodeStageOpen(driven, 0.028f, 1.010f)
             : tripleModern
-                ? TriodeStageOpen(driven, 0.032f, 1.012f)
+                ? TriodeStageOpen(driven, 0.031f, 1.010f)
                 : TriodeStage(driven, 0.035f, 1.015f);
         return StageDcBlock(saturated, ref _leadPowerDcInput, ref _leadPowerDcOutput);
     }

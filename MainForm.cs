@@ -104,7 +104,7 @@ public sealed class MainForm : Form, IMessageFilter
 
     // Bajos, medios, agudos y presencia se recuerdan por separado para los tres canales.
     // Índice 0: limpio; 1: crunch; 2: lead. Segunda dimensión: B, M, T, P.
-    private readonly float[,] _channelEq = new float[11, 4];
+    private readonly float[,] _channelEq = new float[13, 4];
     private int _rememberedChannelIndex;
     private bool _loadingChannelEq;
     private bool _stallReported;
@@ -1000,7 +1000,9 @@ public sealed class MainForm : Form, IMessageFilter
             "Lead moderno apretado",
             "Lead Legacy cantado",
             "Triple Channel Classic, high gain valvular",
-            "Triple Channel Modern, high gain valvular"
+            "Triple Channel Modern, high gain valvular",
+            "Triple Channel Clean, limpio valvular",
+            "Triple Channel Clean Crunch, crunch del canal limpio"
         });
         _guitar1AmpCombo.SelectedIndex = 0;
         AddLabeledControl(table, "Guitarra 1, &amplificador:", _guitar1AmpCombo);
@@ -2141,7 +2143,7 @@ public sealed class MainForm : Form, IMessageFilter
         _externalHeadPostEffects.AccessibleDescription = "Opcional para tocar. Habilita phaser, flanger, chorus, chorus analógico, micro pitch, rotary, tremolo, delay y reverb después del IR. Para grabar una referencia del amplificador déjelo desactivado.";
         AddLabeledControl(table, "Efectos con cabezal externo:", _externalHeadPostEffects);
 
-        ConfigureCombo(_channelCombo, "Canal de amplificador", "Once modelos: tres limpios, tres crunch y cinco lead.");
+        ConfigureCombo(_channelCombo, "Canal de amplificador", "Trece modelos: cuatro limpios, cuatro crunch y cinco lead.");
         _channelCombo.Items.AddRange(new object[]
         {
             "Canal 1: Limpio americano tipo Twin Reverb",
@@ -2154,7 +2156,9 @@ public sealed class MainForm : Form, IMessageFilter
             "Canal 8: Lead moderno apretado",
             "Canal 9: Lead Legacy cantado",
             "Canal 10: Triple Channel Classic, high gain valvular",
-            "Canal 11: Triple Channel Modern, high gain valvular"
+            "Canal 11: Triple Channel Modern, high gain valvular",
+            "Canal 12: Triple Channel Clean, limpio valvular",
+            "Canal 13: Triple Channel Clean Crunch, crunch del canal limpio"
         });
         _channelCombo.SelectedIndex = 0;
         AddLabeledControl(table, "Modelo de &canal:", _channelCombo);
@@ -4721,7 +4725,7 @@ public sealed class MainForm : Form, IMessageFilter
             StoreEqForChannel(0, scene.CleanBass, scene.CleanMiddle, scene.CleanTreble, scene.CleanPresence);
             StoreEqForChannel(1, scene.CrunchBass, scene.CrunchMiddle, scene.CrunchTreble, scene.CrunchPresence);
             StoreEqForChannel(2, scene.LeadBass, scene.LeadMiddle, scene.LeadTreble, scene.LeadPresence);
-            int ch = Math.Clamp((int)scene.Channel, 0, 10);
+            int ch = Math.Clamp((int)scene.Channel, 0, 12);
             _channelCombo.SelectedIndex = ch;
             SetNumeric(_gain, scene.Gain);
 
@@ -5090,7 +5094,7 @@ public sealed class MainForm : Form, IMessageFilter
             StoreEqForChannel(1, scene.CrunchBass, scene.CrunchMiddle, scene.CrunchTreble, scene.CrunchPresence);
             StoreEqForChannel(2, scene.LeadBass, scene.LeadMiddle, scene.LeadTreble, scene.LeadPresence);
 
-            int sceneChannel = Math.Clamp((int)scene.Channel, 0, 10);
+            int sceneChannel = Math.Clamp((int)scene.Channel, 0, 12);
             _channelCombo.SelectedIndex = sceneChannel;
             SetNumeric(_gain, scene.Gain);
             SetNumeric(_bass, _channelEq[sceneChannel, 0]);
@@ -5675,13 +5679,13 @@ public sealed class MainForm : Form, IMessageFilter
             _audioPreferences.LeadTreble, _audioPreferences.LeadPresence);
         StoreEqForChannel(3, 5.5f, 4.5f, 5.5f, 4.5f); StoreEqForChannel(4, 4.5f, 5f, 6.2f, 5.5f);
         StoreEqForChannel(5, 5f, 6.2f, 5.4f, 5.2f); StoreEqForChannel(6, 4.8f, 6f, 6f, 5.8f);
-        StoreEqForChannel(7, 4.5f, 5.5f, 5.2f, 5.5f); StoreEqForChannel(8, 5f, 6.5f, 5f, 5.2f); StoreEqForChannel(9, 6.2f, 4.8f, 5.2f, 5.0f); StoreEqForChannel(10, 6.0f, 4.6f, 5.2f, 5.1f);
-        _rememberedChannelIndex = Math.Clamp(_channelCombo.SelectedIndex, 0, 10);
+        StoreEqForChannel(7, 4.5f, 5.5f, 5.2f, 5.5f); StoreEqForChannel(8, 5f, 6.5f, 5f, 5.2f); StoreEqForChannel(9, 6.2f, 4.8f, 5.2f, 5.0f); StoreEqForChannel(10, 5.8f, 4.9f, 5.3f, 5.3f); StoreEqForChannel(11, 6.2f, 5.5f, 5.8f, 5.3f); StoreEqForChannel(12, 5.4f, 5.2f, 5.7f, 5.4f);
+        _rememberedChannelIndex = Math.Clamp(_channelCombo.SelectedIndex, 0, 12);
     }
 
     private void StoreEqForChannel(int channelIndex, float bass, float middle, float treble, float presence)
     {
-        channelIndex = Math.Clamp(channelIndex, 0, 10);
+        channelIndex = Math.Clamp(channelIndex, 0, 12);
         _channelEq[channelIndex, 0] = Math.Clamp(bass, 0f, 10f);
         _channelEq[channelIndex, 1] = Math.Clamp(middle, 0f, 10f);
         _channelEq[channelIndex, 2] = Math.Clamp(treble, 0f, 10f);
@@ -5695,7 +5699,7 @@ public sealed class MainForm : Form, IMessageFilter
             return;
         }
 
-        int channelIndex = Math.Clamp(_channelCombo.SelectedIndex, 0, 10);
+        int channelIndex = Math.Clamp(_channelCombo.SelectedIndex, 0, 12);
         StoreEqForChannel(channelIndex,
             (float)_bass.Value, (float)_middle.Value, (float)_treble.Value, (float)_presence.Value);
     }
@@ -5710,12 +5714,12 @@ public sealed class MainForm : Form, IMessageFilter
 
         if (_loadingScene || _loadingChannelEq)
         {
-            _rememberedChannelIndex = Math.Clamp(newChannelIndex, 0, 10);
+            _rememberedChannelIndex = Math.Clamp(newChannelIndex, 0, 12);
             return;
         }
 
         // Antes de salir del canal actual se conserva su ecualización.
-        int previousChannel = Math.Clamp(_rememberedChannelIndex, 0, 10);
+        int previousChannel = Math.Clamp(_rememberedChannelIndex, 0, 12);
         StoreEqForChannel(previousChannel,
             (float)_bass.Value, (float)_middle.Value, (float)_treble.Value, (float)_presence.Value);
 
@@ -6193,7 +6197,7 @@ public sealed class MainForm : Form, IMessageFilter
             ScenePreset sound = effects with
             {
                 Name = CleanPresetBank.IsCleanSound(effects) ? effects.Name : name,
-                Channel = (AmpChannel)Math.Clamp(_guitar1AmpCombo.SelectedIndex, 0, 10),
+                Channel = (AmpChannel)Math.Clamp(_guitar1AmpCombo.SelectedIndex, 0, 12),
                 Gain = (float)_guitar1Gain.Value,
                 OutputPercent = (float)_guitar1Output.Value,
                 ExternalIrEnabled = !string.IsNullOrWhiteSpace(_guitar1LoadedIrPath) && _engine.Guitar1Processor.HasExternalImpulse,
@@ -9763,7 +9767,7 @@ public sealed class MainForm : Form, IMessageFilter
             {
                 Revision = Interlocked.Increment(ref _revision),
                 SimulationEnabled = true,
-                Channel = (AmpChannel)Math.Clamp(_guitar1AmpCombo.SelectedIndex, 0, 10),
+                Channel = (AmpChannel)Math.Clamp(_guitar1AmpCombo.SelectedIndex, 0, 12),
                 Gain = (float)_guitar1Gain.Value,
                 Bass = 5.0f,
                 Middle = 5.0f,
@@ -9803,7 +9807,7 @@ public sealed class MainForm : Form, IMessageFilter
             {
                 Revision = Interlocked.Increment(ref _revision),
                 SimulationEnabled = true,
-                Channel = (AmpChannel)Math.Clamp(_guitar1AmpCombo.SelectedIndex, 0, 10),
+                Channel = (AmpChannel)Math.Clamp(_guitar1AmpCombo.SelectedIndex, 0, 12),
                 Gain = (float)_guitar1Gain.Value,
                 Bass = 5.0f,
                 Middle = 5.0f,

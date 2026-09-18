@@ -1,3 +1,19 @@
+Amp Accessible 2.41.83 - Triple Channel Referencia Real Spring JAWS
+Base estable: 2.41.82 (d42c6d64).
+- Ajustes derivados de una grabacion real con cuatro tomas consecutivas: Clean, Classic, Modern y Clean con Crunch del cabezal.
+- F33 Triple Channel Classic permanece exactamente igual a 2.41.82.
+- Modern real mostro menor nivel pero mas cresta dinamica y mayor contenido de medios-altos que Classic; F34 pasa a Gain 6.8, Output 33.5 y reduce compresion de potencia.
+- El drive adicional de Modern se concentra en etapas 2 y 3; se aumenta el ataque y la presencia de 1 a 2 kHz sin convertirlo en fuzz.
+- Nuevo Canal 12 Triple Channel Clean: alto headroom, ruptura tardia y mayor rango dinamico; se refuerzan graves y medios bajos para conservar el cuerpo grande de la toma real.
+- Nuevo Canal 13 Triple Channel Clean Crunch: saturacion moderada del canal limpio, mas armonicos en medios-altos y menos ganancia que Classic.
+- Spring reajustada con la cuerda grave real: primer rebote mas temprano, tres recorridos desiguales y cola de aproximadamente 3,5 segundos con Decay 48 por ciento.
+- Room, Plate, Hall, Church, Shimmer y Cathedral permanecen sin cambios.
+- Nuevos F35 Triple Channel Clean y F36 Triple Channel Clean Crunch, ambos secos y sin pedales para comparar el amplificador solo.
+- El diagnostico DSP ahora agrupa todos los modelos en limpio, crunch o lead, incluyendo los dos canales nuevos.
+- Modo Cabezal Externo, efectos post IR, NAM, IR, perfiles de clase, voz y Loopback quedan intactos.
+- Referencia aproximada de la toma real: Clean con cresta 16.7 dB; Classic 8.8 dB; Modern 12.1 dB; Clean Crunch 9.3 dB. Los pasajes no son DI identicos, por lo que estos valores guian el ajuste y no se tratan como medicion de transferencia exacta.
+- Publicacion: unico incremental Amp_Accessible_2.41.82_a_2.41.83.gdmupdate, mas Setup, Publicacion.zip y update-channel.json.
+
 Amp Accessible 2.41.82 - Cabezal Externo IR Efectos JAWS
 Base estable: 2.41.81 (b0e26c84).
 - Nuevo Modo Cabezal Externo para usar un amplificador real conectado mediante load box y Focusrite.
