@@ -56,6 +56,10 @@ public sealed record DspParameters
 {
     public int Revision { get; init; }
     public bool SimulationEnabled { get; init; } = true;
+    // 2.41.82: recibe un cabezal real desde una load box. Omite preefectos, ampli y NAM.
+    public bool ExternalHeadMode { get; init; }
+    // Permite solamente efectos posteriores al IR para tocar; apagado es la ruta de referencia.
+    public bool ExternalHeadPostEffects { get; init; }
     public AmpChannel Channel { get; init; } = AmpChannel.CleanTwin;
 
     public float Gain { get; init; } = 3.0f;

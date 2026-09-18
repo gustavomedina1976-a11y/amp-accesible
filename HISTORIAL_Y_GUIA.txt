@@ -1,3 +1,15 @@
+Amp Accessible 2.41.82 - Cabezal Externo IR Efectos JAWS
+Base estable: 2.41.81 (b0e26c84).
+- Nuevo Modo Cabezal Externo para usar un amplificador real conectado mediante load box y Focusrite.
+- Ruta de referencia: entrada de la Focusrite -> gabinete/IR -> salida; se omiten pedales previos, amplificador interno y NAM.
+- Opcion Efectos post IR permite tocar con phaser, flanger, chorus, chorus analogico, micro pitch, rotary, tremolo, delay y reverb despues del IR.
+- Con Efectos post IR apagado se obtiene la ruta indicada para grabar referencias de los canales Clean, Classic y Modern del cabezal real.
+- Si hay un IR A externo cargado al activar Cabezal Externo, se activa automaticamente. El diagnostico informa si falta un IR externo.
+- El modo no altera ni borra ajustes de amplificadores, NAM o pedales: al desactivarlo se restaura la cadena normal.
+- F33 Triple Channel Classic y F34 Triple Channel Modern permanecen intactos.
+- Perfiles de clase, voz, Loopback, dos guitarras, acompañamiento, grabadora y UpdateService quedan sin cambios.
+- Publicacion: unico incremental Amp_Accessible_2.41.81_a_2.41.82.gdmupdate, mas Setup, Publicacion.zip y update-channel.json.
+
 Amp Accessible 2.41.81 - Triple Channel Classic Modern JAWS
 Base estable: 2.41.80 (1136bbfc).
 - El Canal 10 de 2.41.80 queda conservado como Triple Channel Classic, sin cambios tonales.

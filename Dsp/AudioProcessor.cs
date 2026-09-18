@@ -316,7 +316,7 @@ internal sealed class AudioProcessor : IDisposable
         // NAM reemplaza solamente la etapa de amplificador. Se procesa por bloque para
         // evitar una llamada P/Invoke por muestra. Si el motor/modelo no está disponible,
         // se conserva automáticamente la ruta de amplificador interno de siempre.
-        if (!_hardTunerBypass && parameters.NamEnabled && _namProcessor.HasModel && frames <= _namInput.Length)
+        if (!_hardTunerBypass && !parameters.ExternalHeadMode && parameters.NamEnabled && _namProcessor.HasModel && frames <= _namInput.Length)
         {
             ProcessNamPath(guitarInput, voiceInput, output, meetOutput, loopCaptureOutput, frames, parameters, ampModel,
                 convolver, useExternalIr, convolverB, useExternalIrB, hasVoice,
@@ -364,13 +364,33 @@ internal sealed class AudioProcessor : IDisposable
             float processedRight = dryInput;
             if (needsSimulation)
             {
-                float x = ProcessPreEffects(dryInput, parameters.PreEffectOrder, parameters.Eq5Placement);
-                x = ampModel.ProcessAmplifier(x);
-                x = ProcessCabinet(x, ampModel, convolver, useExternalIr, convolverB, useExternalIrB, parameters);
-                if (parameters.Eq5Placement == EqPlacement.AfterAmp) x = _eq5.Process(x);
+                if (parameters.ExternalHeadMode)
+                {
+                    // La señal ya contiene previo + etapa de potencia del cabezal real.
+                    // Sólo aplicamos gabinete/IR. Los efectos son opcionales y siempre
+                    // posteriores al IR para no alterar la referencia del amplificador.
+                    float x = ProcessCabinet(dryInput, ampModel, convolver, useExternalIr, convolverB, useExternalIrB, parameters);
+                    if (parameters.ExternalHeadPostEffects)
+                    {
+                        _effectsLoop.Process(x, out processedLeft, out processedRight);
+                        _reverb.Process(processedLeft, processedRight, out processedLeft, out processedRight);
+                    }
+                    else
+                    {
+                        processedLeft = x;
+                        processedRight = x;
+                    }
+                }
+                else
+                {
+                    float x = ProcessPreEffects(dryInput, parameters.PreEffectOrder, parameters.Eq5Placement);
+                    x = ampModel.ProcessAmplifier(x);
+                    x = ProcessCabinet(x, ampModel, convolver, useExternalIr, convolverB, useExternalIrB, parameters);
+                    if (parameters.Eq5Placement == EqPlacement.AfterAmp) x = _eq5.Process(x);
 
-                _effectsLoop.Process(x, out processedLeft, out processedRight);
-                _reverb.Process(processedLeft, processedRight, out processedLeft, out processedRight);
+                    _effectsLoop.Process(x, out processedLeft, out processedRight);
+                    _reverb.Process(processedLeft, processedRight, out processedLeft, out processedRight);
+                }
             }
 
             float dryMix = 1f - simulationMix;
@@ -959,6 +979,8 @@ internal sealed class AudioProcessor : IDisposable
         }
 
         if (first ||
+            previous.ExternalHeadMode != parameters.ExternalHeadMode ||
+            previous.ExternalHeadPostEffects != parameters.ExternalHeadPostEffects ||
             previous.FxLoopEnabled != parameters.FxLoopEnabled ||
             Changed(previous.FxLoopSendPercent, parameters.FxLoopSendPercent) ||
             Changed(previous.FxLoopReturnPercent, parameters.FxLoopReturnPercent) ||
@@ -1000,7 +1022,7 @@ internal sealed class AudioProcessor : IDisposable
             Changed(previous.DelayMixPercent, parameters.DelayMixPercent))
         {
             _effectsLoop.Configure(
-                parameters.FxLoopEnabled,
+                parameters.FxLoopEnabled || (parameters.ExternalHeadMode && parameters.ExternalHeadPostEffects),
                 parameters.FxLoopSendPercent,
                 parameters.FxLoopReturnPercent,
                 parameters.PhaserEnabled,
@@ -1014,12 +1036,12 @@ internal sealed class AudioProcessor : IDisposable
                 parameters.FlangerDepthPercent,
                 parameters.FlangerFeedbackPercent,
                 parameters.FlangerMixPercent,
-                parameters.ChorusEnabled && parameters.ChorusPlacement == ChorusPlacement.Loop,
+                parameters.ChorusEnabled && (parameters.ChorusPlacement == ChorusPlacement.Loop || parameters.ExternalHeadMode),
                 parameters.ChorusCharacter,
                 parameters.ChorusRateHz,
                 parameters.ChorusDepthMs,
                 parameters.ChorusMixPercent,
-                parameters.AnalogChorusEnabled && parameters.AnalogChorusPlacement == ChorusPlacement.Loop,
+                parameters.AnalogChorusEnabled && (parameters.AnalogChorusPlacement == ChorusPlacement.Loop || parameters.ExternalHeadMode),
                 parameters.AnalogChorusRateHz,
                 parameters.AnalogChorusDepth,
                 parameters.AnalogChorusMixPercent,
@@ -1085,6 +1107,12 @@ internal sealed class AudioProcessor : IDisposable
                 _voiceDuckGain = 1f;
                 _voiceDuckHoldCounter = 0;
             }
+        }
+
+        if (first || previous.ExternalHeadMode != parameters.ExternalHeadMode || previous.ExternalHeadPostEffects != parameters.ExternalHeadPostEffects)
+        {
+            _effectsLoop.Reset();
+            _reverb.Reset();
         }
 
         if (parameters.SimulationEnabled != _simulationEnabled)

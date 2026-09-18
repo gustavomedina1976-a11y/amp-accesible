@@ -36,6 +36,8 @@ public sealed class MainForm : Form, IMessageFilter
     private readonly Button _openAudioDiagnosticsFolderButton = new();
     private readonly ComboBox _channelCombo = new();
     private readonly CheckBox _simulationEnabled = new();
+    private readonly CheckBox _externalHeadMode = new();
+    private readonly CheckBox _externalHeadPostEffects = new();
     private readonly Button _refreshDriversButton = new();
     private readonly Button _asioPanelButton = new();
     private readonly Button _startStopButton = new();
@@ -2129,6 +2131,16 @@ public sealed class MainForm : Form, IMessageFilter
         _simulationEnabled.AccessibleDescription = "Cuando se desactiva se escucha la guitarra directa con el volumen maestro, sin puerta, pedales, amplificador, gabinete ni efectos.";
         AddLabeledControl(table, "Bypass general:", _simulationEnabled);
 
+        _externalHeadMode.Text = "Usar &cabezal externo / load box: sólo gabinete o IR";
+        _externalHeadMode.AccessibleName = "Modo cabezal externo, load box, sólo gabinete o IR";
+        _externalHeadMode.AccessibleDescription = "Para conectar un cabezal real mediante una load box a la Focusrite. Omite pedales previos, amplificador interno y NAM. La señal pasa directamente al gabinete o IR seleccionado.";
+        AddLabeledControl(table, "Cabezal externo:", _externalHeadMode);
+
+        _externalHeadPostEffects.Text = "Permitir &efectos post IR en modo cabezal externo";
+        _externalHeadPostEffects.AccessibleName = "Permitir efectos posteriores al IR con cabezal externo";
+        _externalHeadPostEffects.AccessibleDescription = "Opcional para tocar. Habilita phaser, flanger, chorus, chorus analógico, micro pitch, rotary, tremolo, delay y reverb después del IR. Para grabar una referencia del amplificador déjelo desactivado.";
+        AddLabeledControl(table, "Efectos con cabezal externo:", _externalHeadPostEffects);
+
         ConfigureCombo(_channelCombo, "Canal de amplificador", "Once modelos: tres limpios, tres crunch y cinco lead.");
         _channelCombo.Items.AddRange(new object[]
         {
@@ -3663,6 +3675,33 @@ public sealed class MainForm : Form, IMessageFilter
         };
         _openVbCablePageButton.Click += (_, _) => OpenVbCableOfficialPage();
         _meetOutputEnabled.CheckedChanged += (_, _) => ApplyMeetOutput();
+        _externalHeadMode.CheckedChanged += (_, _) =>
+        {
+            if (_externalHeadMode.Checked && !string.IsNullOrWhiteSpace(_loadedIrPath) && !_externalIrEnabled.Checked)
+                _externalIrEnabled.Checked = true;
+
+            UpdateParameters();
+            if (_externalHeadMode.Checked)
+            {
+                bool hasExternalIr = _externalIrEnabled.Checked && !string.IsNullOrWhiteSpace(_loadedIrPath);
+                SetStatus(hasExternalIr
+                    ? "Modo Cabezal Externo activo. Amplificador interno, NAM y pedales previos omitidos. IR A externo activo."
+                    : "Modo Cabezal Externo activo, pero no hay IR A externo activo. Para una referencia fiel cargue y active un IR de parlante; mientras tanto se usa el gabinete interno.", !hasExternalIr);
+            }
+            else
+            {
+                SetStatus("Modo Cabezal Externo desactivado. Se restaura la cadena normal de Amp Accessible.");
+            }
+        };
+        _externalHeadPostEffects.CheckedChanged += (_, _) =>
+        {
+            UpdateParameters();
+            if (_externalHeadMode.Checked)
+                SetStatus(_externalHeadPostEffects.Checked
+                    ? "Cabezal Externo: efectos post IR habilitados para tocar."
+                    : "Cabezal Externo: efectos post IR apagados. Ruta de referencia preparada.");
+        };
+
         _voiceOnlyMode.CheckedChanged += (_, _) =>
         {
             if (_voiceOnlyMode.Checked && !_voiceEnabled.Checked) _voiceEnabled.Checked = true;
@@ -7699,6 +7738,7 @@ public sealed class MainForm : Form, IMessageFilter
                 ? "Micrófono activo: entrada 1; ruta de guitarra ignorada"
                 : $"Entrada de guitarra: {input}");
         text.AppendLine($"Blindaje de rutas de clase: {(_engine.ClassProfileRouteGuardEnabled ? "activo; Input 1 reservado para voz e Input 2 para guitarra" : "inactivo")}; autocorrecciones de ruta {_engine.ClassProfileRouteCorrections}.");
+        text.AppendLine($"Modo cabezal externo: {(_externalHeadMode.Checked ? "ACTIVO; amplificador interno, NAM y pedales previos omitidos" : "inactivo")}; efectos post IR {(_externalHeadMode.Checked && _externalHeadPostEffects.Checked ? "activos" : "apagados")}; IR A externo {(_externalIrEnabled.Checked && !string.IsNullOrWhiteSpace(_loadedIrPath) ? "activo" : "no activo")}.");
         if (_engine.SessionDriverInputChannels > 0 || _engine.SessionDriverOutputChannels > 0)
             text.AppendLine($"Canales del driver: {_engine.SessionDriverInputChannels} entradas, {_engine.SessionDriverOutputChannels} salidas");
         text.AppendLine($"Frecuencia de trabajo: {AudioEngine.SampleRate} Hz");
@@ -9478,7 +9518,9 @@ public sealed class MainForm : Form, IMessageFilter
         var parameters = new DspParameters
         {
             Revision = Interlocked.Increment(ref _revision),
-            SimulationEnabled = _twoGuitarMode.Checked || _simulationEnabled.Checked,
+            SimulationEnabled = _twoGuitarMode.Checked || _simulationEnabled.Checked || _externalHeadMode.Checked,
+            ExternalHeadMode = !_twoGuitarMode.Checked && _externalHeadMode.Checked,
+            ExternalHeadPostEffects = !_twoGuitarMode.Checked && _externalHeadMode.Checked && _externalHeadPostEffects.Checked,
             Channel = (AmpChannel)_channelCombo.SelectedIndex,
             Gain = (float)_gain.Value,
             Bass = (float)_bass.Value,
