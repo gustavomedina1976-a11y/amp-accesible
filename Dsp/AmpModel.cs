@@ -419,16 +419,22 @@ internal sealed class AmpModel
                 stage1 = _stage1LowPass.Process(stage1);
 
                 float drive2 = 1.13f + (_gainNormalized * 2.30f);
-                float stage2 = TriodeStageOpen(_stage2HighPass.Process(stage1) * drive2, -0.110f, 1.038f);
+                // 2.41.85: mas asimetria y curvatura, sin aumentar el drive nominal.
+                // Facilita la aparicion de armonicos artificiales conservando el ataque.
+                float stage2 = TriodeStageOpen(_stage2HighPass.Process(stage1) * drive2, -0.128f, 1.052f);
                 stage2 = StageDcBlock(stage2, ref _stage2DcInput, ref _stage2DcOutput);
                 stage2 = _stage2LowPass.Process(stage2);
 
                 float drive3 = 1.06f + (_gainNormalized * 1.61f);
-                float stage3 = TriodeStageOpen(stage2 * drive3, 0.058f, 1.020f);
+                // Polarizacion opuesta a la etapa 2 para enriquecer pares e impares
+                // sin sumar un generador de pitch ni un excitador artificial.
+                float stage3 = TriodeStageOpen(stage2 * drive3, 0.078f, 1.034f);
                 stage3 = StageDcBlock(stage3, ref _stage3DcInput, ref _stage3DcOutput);
                 stage3 = _stage3LowPass.Process(stage3);
 
-                float preamp = (stage1 * 0.10f) + (stage2 * 0.34f) + (stage3 * 0.56f);
+                // Un poco mas de etapa 2 deja salir antes el contenido armonico de la pua,
+                // mientras la etapa 3 sigue aportando sustain. La potencia queda intacta.
+                float preamp = (stage1 * 0.10f) + (stage2 * 0.37f) + (stage3 * 0.53f);
                 float power = ProcessLeadPowerStage(preamp);
                 return ((preamp * 0.48f) + (power * 0.52f)) * sag;
             }

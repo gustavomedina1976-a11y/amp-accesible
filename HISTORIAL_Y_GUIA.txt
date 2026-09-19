@@ -1,3 +1,14 @@
+Amp Accessible 2.41.85 - Triple Channel Modern Armonicos Valvulares JAWS
+Base estable: 2.41.84 (f60d4a21).
+- Cambio exclusivo en Canal 11 Triple Channel Modern.
+- La toma real del Vintage Electric mostro que los armonicos artificiales aparecen con mas facilidad que en el modelo interno.
+- Se conserva F34 en Gain 7.0, Output 33.5 y la misma EQ. No se aumenta el volumen ni la compresion de potencia.
+- Etapa 2: mayor polarizacion asimetrica y curvatura valvular para generar mas contenido armonico con el ataque de pua.
+- Etapa 3: polarizacion complementaria para enriquecer armonicos pares e impares sin usar pitch ni excitador artificial.
+- La mezcla de previo da un poco mas de peso a etapa 2 para que el armonico florezca antes, manteniendo sustain.
+- F33 Classic, F35 Clean, F36 Clean Crunch, Spring, resto de reverbs, memoria por amplificador, NAM, IR, perfiles de clase y Loopback quedan intactos.
+- Publicacion: unico incremental Amp_Accessible_2.41.84_a_2.41.85.gdmupdate, mas Setup, Publicacion.zip y update-channel.json.
+
 Amp Accessible 2.41.84 - Controles por Amplificador Reverb Completa JAWS
 Base estable: 2.41.83 (bcab239c).
 - Cada uno de los 13 amplificadores recuerda de forma independiente Gain, Bajos, Medios, Agudos, Presencia y Volumen del amplificador.
