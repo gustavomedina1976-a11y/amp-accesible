@@ -418,12 +418,12 @@ internal sealed class AmpModel
                 stage1 = StageDcBlock(stage1, ref _stage1DcInput, ref _stage1DcOutput);
                 stage1 = _stage1LowPass.Process(stage1);
 
-                float drive2 = 1.12f + (_gainNormalized * 2.24f);
+                float drive2 = 1.13f + (_gainNormalized * 2.30f);
                 float stage2 = TriodeStageOpen(_stage2HighPass.Process(stage1) * drive2, -0.110f, 1.038f);
                 stage2 = StageDcBlock(stage2, ref _stage2DcInput, ref _stage2DcOutput);
                 stage2 = _stage2LowPass.Process(stage2);
 
-                float drive3 = 1.05f + (_gainNormalized * 1.55f);
+                float drive3 = 1.06f + (_gainNormalized * 1.61f);
                 float stage3 = TriodeStageOpen(stage2 * drive3, 0.058f, 1.020f);
                 stage3 = StageDcBlock(stage3, ref _stage3DcInput, ref _stage3DcOutput);
                 stage3 = _stage3LowPass.Process(stage3);

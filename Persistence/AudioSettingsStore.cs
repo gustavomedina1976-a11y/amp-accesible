@@ -39,6 +39,15 @@ internal sealed class AudioPreferences
     public float LeadTreble { get; set; } = 5.0f;
     public float LeadPresence { get; set; } = 5.3f;
 
+    // 2.41.84: memoria persistente completa por modelo de amplificador.
+    // Se agregan al final del formato JSON sin romper audio.json de versiones anteriores.
+    public float[] AmpGainByChannel { get; set; } = Array.Empty<float>();
+    public float[] AmpOutputByChannel { get; set; } = Array.Empty<float>();
+    public float[] AmpBassByChannel { get; set; } = Array.Empty<float>();
+    public float[] AmpMiddleByChannel { get; set; } = Array.Empty<float>();
+    public float[] AmpTrebleByChannel { get; set; } = Array.Empty<float>();
+    public float[] AmpPresenceByChannel { get; set; } = Array.Empty<float>();
+
     // Voz independiente de las escenas. Usa la entrada física 1 cuando el dispositivo ofrece más de una entrada.
     public bool VoiceEnabled { get; set; } = false;
     public bool VoiceOnlyMode { get; set; } = false;
@@ -230,6 +239,7 @@ internal static class AudioSettingsStore
         settings.LeadMiddle = ClampTone(settings.LeadMiddle, 6.2f);
         settings.LeadTreble = ClampTone(settings.LeadTreble, 5.0f);
         settings.LeadPresence = ClampTone(settings.LeadPresence, 5.3f);
+        NormalizeAmpControls(settings);
 
         settings.VoiceThresholdDb = ClampFinite(settings.VoiceThresholdDb, -75f, -20f, -48f);
         settings.VoiceReductionDb = ClampFinite(settings.VoiceReductionDb, 0f, 60f, 30f);
@@ -247,7 +257,7 @@ internal static class AudioSettingsStore
         settings.MeetGuitarPercent = ClampFinite(settings.MeetGuitarPercent, 0f, 150f, 100f);
         settings.MeetVoicePercent = ClampFinite(settings.MeetVoicePercent, 0f, 150f, 125f);
         settings.MeetOutputDeviceId ??= string.Empty;
-        settings.Guitar1AmpChannel = Math.Clamp(settings.Guitar1AmpChannel, 0, 8);
+        settings.Guitar1AmpChannel = Math.Clamp(settings.Guitar1AmpChannel, 0, 12);
         settings.Guitar1Gain = ClampFinite(settings.Guitar1Gain, 0f, 10f, 3f);
         settings.Guitar1OutputPercent = ClampFinite(settings.Guitar1OutputPercent, 0f, 100f, 50f);
         settings.Guitar1MixPercent = ClampFinite(settings.Guitar1MixPercent, 0f, 100f, 70f);
@@ -280,6 +290,86 @@ internal static class AudioSettingsStore
         settings.PianoVolumePercent = ClampFinite(settings.PianoVolumePercent, 0f, 100f, 24f);
         settings.LoopBars = settings.LoopBars switch { 1 or 2 or 4 or 8 => settings.LoopBars, _ => 4 };
         settings.LoopCaptureSource = Math.Clamp(settings.LoopCaptureSource, 0, 2);
+    }
+
+    private const int AmpChannelCount = 13;
+
+    private static readonly float[] DefaultAmpGainByChannel =
+        { 3f, 3f, 3f, 3f, 3f, 4f, 4f, 5f, 5f, 6.3f, 7.0f, 3.4f, 4.8f };
+    private static readonly float[] DefaultAmpOutputByChannel =
+        { 25f, 25f, 25f, 25f, 25f, 25f, 25f, 25f, 25f, 37f, 33.5f, 40f, 36.5f };
+    private static readonly float[] DefaultAmpBassByChannel =
+        { 5.0f, 5.0f, 4.8f, 5.5f, 4.5f, 5.0f, 4.8f, 4.5f, 5.0f, 6.2f, 5.8f, 6.2f, 5.4f };
+    private static readonly float[] DefaultAmpMiddleByChannel =
+        { 4.0f, 6.0f, 6.2f, 4.5f, 5.0f, 6.2f, 6.0f, 5.5f, 6.5f, 4.8f, 4.9f, 5.5f, 5.2f };
+    private static readonly float[] DefaultAmpTrebleByChannel =
+        { 6.0f, 5.2f, 5.0f, 5.5f, 6.2f, 5.4f, 6.0f, 5.2f, 5.0f, 5.2f, 5.3f, 5.8f, 5.7f };
+    private static readonly float[] DefaultAmpPresenceByChannel =
+        { 5.0f, 5.0f, 5.3f, 4.5f, 5.5f, 5.2f, 5.8f, 5.5f, 5.2f, 5.0f, 5.3f, 5.3f, 5.4f };
+
+    private static void NormalizeAmpControls(AudioPreferences settings)
+    {
+        bool hadCompleteMemory =
+            settings.AmpGainByChannel is { Length: AmpChannelCount } &&
+            settings.AmpOutputByChannel is { Length: AmpChannelCount } &&
+            settings.AmpBassByChannel is { Length: AmpChannelCount } &&
+            settings.AmpMiddleByChannel is { Length: AmpChannelCount } &&
+            settings.AmpTrebleByChannel is { Length: AmpChannelCount } &&
+            settings.AmpPresenceByChannel is { Length: AmpChannelCount };
+
+        settings.AmpGainByChannel = NormalizeAmpArray(settings.AmpGainByChannel, DefaultAmpGainByChannel, 0f, 10f);
+        settings.AmpOutputByChannel = NormalizeAmpArray(settings.AmpOutputByChannel, DefaultAmpOutputByChannel, 0f, 100f);
+        settings.AmpBassByChannel = NormalizeAmpArray(settings.AmpBassByChannel, DefaultAmpBassByChannel, 0f, 10f);
+        settings.AmpMiddleByChannel = NormalizeAmpArray(settings.AmpMiddleByChannel, DefaultAmpMiddleByChannel, 0f, 10f);
+        settings.AmpTrebleByChannel = NormalizeAmpArray(settings.AmpTrebleByChannel, DefaultAmpTrebleByChannel, 0f, 10f);
+        settings.AmpPresenceByChannel = NormalizeAmpArray(settings.AmpPresenceByChannel, DefaultAmpPresenceByChannel, 0f, 10f);
+
+        // La primera carga desde 2.41.83 conserva la EQ histórica de los tres modelos originales.
+        if (!hadCompleteMemory)
+        {
+            settings.AmpBassByChannel[0] = settings.CleanBass;
+            settings.AmpMiddleByChannel[0] = settings.CleanMiddle;
+            settings.AmpTrebleByChannel[0] = settings.CleanTreble;
+            settings.AmpPresenceByChannel[0] = settings.CleanPresence;
+
+            settings.AmpBassByChannel[1] = settings.CrunchBass;
+            settings.AmpMiddleByChannel[1] = settings.CrunchMiddle;
+            settings.AmpTrebleByChannel[1] = settings.CrunchTreble;
+            settings.AmpPresenceByChannel[1] = settings.CrunchPresence;
+
+            settings.AmpBassByChannel[2] = settings.LeadBass;
+            settings.AmpMiddleByChannel[2] = settings.LeadMiddle;
+            settings.AmpTrebleByChannel[2] = settings.LeadTreble;
+            settings.AmpPresenceByChannel[2] = settings.LeadPresence;
+        }
+
+        // Se mantienen los campos históricos sincronizados para compatibilidad hacia atrás.
+        settings.CleanBass = settings.AmpBassByChannel[0];
+        settings.CleanMiddle = settings.AmpMiddleByChannel[0];
+        settings.CleanTreble = settings.AmpTrebleByChannel[0];
+        settings.CleanPresence = settings.AmpPresenceByChannel[0];
+
+        settings.CrunchBass = settings.AmpBassByChannel[1];
+        settings.CrunchMiddle = settings.AmpMiddleByChannel[1];
+        settings.CrunchTreble = settings.AmpTrebleByChannel[1];
+        settings.CrunchPresence = settings.AmpPresenceByChannel[1];
+
+        settings.LeadBass = settings.AmpBassByChannel[2];
+        settings.LeadMiddle = settings.AmpMiddleByChannel[2];
+        settings.LeadTreble = settings.AmpTrebleByChannel[2];
+        settings.LeadPresence = settings.AmpPresenceByChannel[2];
+    }
+
+    private static float[] NormalizeAmpArray(float[]? source, float[] defaults, float minimum, float maximum)
+    {
+        var normalized = new float[AmpChannelCount];
+        for (int index = 0; index < AmpChannelCount; index++)
+        {
+            float fallback = defaults[index];
+            float value = source is { Length: AmpChannelCount } ? source[index] : fallback;
+            normalized[index] = ClampFinite(value, minimum, maximum, fallback);
+        }
+        return normalized;
     }
 
     private static float ClampFinite(float value, float minimum, float maximum, float fallback)

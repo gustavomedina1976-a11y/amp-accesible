@@ -1,3 +1,16 @@
+Amp Accessible 2.41.84 - Controles por Amplificador Reverb Completa JAWS
+Base estable: 2.41.83 (bcab239c).
+- Cada uno de los 13 amplificadores recuerda de forma independiente Gain, Bajos, Medios, Agudos, Presencia y Volumen del amplificador.
+- El antiguo Nivel de salida seguro pasa a presentarse como Volumen del amplificador. Sigue siendo OutputPercent del DSP y no modifica el Master global.
+- Al cambiar de modelo se guarda primero el amplificador anterior y se restaura el nuevo en un solo bloque; JAWS anuncia los seis valores cargados.
+- La memoria completa se guarda en audio.json. Al actualizar desde 2.41.83 se conservan las EQ historicas de Clean, Crunch y Lead y se inicializan los demas modelos con valores seguros.
+- Canal 11 Triple Channel Modern: ajuste pequeno de saturacion en etapas 2 y 3; F34 pasa de Gain 6.8 a 7.0. Se conservan ataque, voicing y menor compresion de potencia de 2.41.83.
+- Reverb muestra ahora seis controles: Mezcla, Duracion, Brillo, Pre retardo, Amortiguacion y Difusion. JAWS explica el efecto de los tres controles nuevos.
+- El algoritmo Spring de 2.41.83 no se altera: conserva rebote temprano, tres recorridos desiguales y cola extendida.
+- Se corrige tambien la persistencia del selector de amplificador de Guitarra 1 para admitir los 13 modelos.
+- NAM, IR, Cabezal Externo, perfiles de clase, voz, Loopback, acompanamiento, looper y grabadora permanecen sin cambios.
+- Publicacion: unico incremental Amp_Accessible_2.41.83_a_2.41.84.gdmupdate, mas Setup, Publicacion.zip y update-channel.json.
+
 Amp Accessible 2.41.83 - Triple Channel Referencia Real Spring JAWS
 Base estable: 2.41.82 (d42c6d64).
 - Ajustes derivados de una grabacion real con cuatro tomas consecutivas: Clean, Classic, Modern y Clean con Crunch del cabezal.

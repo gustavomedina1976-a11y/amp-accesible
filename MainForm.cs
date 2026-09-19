@@ -102,8 +102,10 @@ public sealed class MainForm : Form, IMessageFilter
     private AudioPreferences _audioPreferences = AudioSettingsStore.Load();
     private NamLibrary _namLibrary = NamLibraryStore.Load();
 
-    // Bajos, medios, agudos y presencia se recuerdan por separado para los tres canales.
-    // Índice 0: limpio; 1: crunch; 2: lead. Segunda dimensión: B, M, T, P.
+    // 2.41.84: memoria completa e independiente para los 13 amplificadores.
+    // Cada modelo conserva Gain, EQ, Presencia y Volumen del amplificador.
+    private readonly float[] _channelGain = new float[13];
+    private readonly float[] _channelOutput = new float[13];
     private readonly float[,] _channelEq = new float[13, 4];
     private int _rememberedChannelIndex;
     private bool _loadingChannelEq;
@@ -2167,9 +2169,9 @@ public sealed class MainForm : Form, IMessageFilter
         {
             AutoSize = true,
             MaximumSize = new Size(760, 0),
-            Text = "Bajos, medios, agudos y presencia se recuerdan de forma independiente para cada canal.",
-            AccessibleName = "Ecualización independiente por canal",
-            AccessibleDescription = "Al cambiar entre limpio, crunch y lead se recuperan automáticamente los cuatro controles de ecualización de ese canal."
+            Text = "Ganancia, bajos, medios, agudos, presencia y volumen se recuerdan de forma independiente para cada amplificador.",
+            AccessibleName = "Controles independientes por amplificador",
+            AccessibleDescription = "Al cambiar de amplificador se recuperan automáticamente ganancia, ecualización, presencia y volumen propios de ese modelo."
         };
         AddLabeledControl(table, "Ecualización por canal:", eqInfo);
 
@@ -2178,7 +2180,7 @@ public sealed class MainForm : Form, IMessageFilter
         AddLabeledControl(table, "&Medios, de 0 a 10:", ConfigureNumeric(_middle, "Medios"));
         AddLabeledControl(table, "&Agudos, de 0 a 10:", ConfigureNumeric(_treble, "Agudos"));
         AddLabeledControl(table, "P&resencia, de 0 a 10:", ConfigureNumeric(_presence, "Presencia"));
-        AddLabeledControl(table, "Nivel de &salida seguro, de 0 a 100:", ConfigureNumeric(_output, "Nivel general de salida seguro. Valor inicial 25 por ciento"));
+        AddLabeledControl(table, "Volumen de &salida del amplificador, de 0 a 100:", ConfigureNumeric(_output, "Volumen propio del amplificador seleccionado. Se recuerda de forma independiente para cada modelo y no modifica el master global."));
         return group;
     }
 
@@ -3256,6 +3258,9 @@ public sealed class MainForm : Form, IMessageFilter
         AddLabeledControl(table, "Mezcla en porcentaje:", ConfigureNumeric(_reverbMix, "Mezcla del reverb"));
         AddLabeledControl(table, "Duración en porcentaje:", ConfigureNumeric(_reverbDecay, "Duración del reverb"));
         AddLabeledControl(table, "Brillo en porcentaje:", ConfigureNumeric(_reverbTone, "Brillo del reverb"));
+        AddLabeledControl(table, "Pre retardo, de 0 a 150 milisegundos:", ConfigureNumeric(_reverbPreDelay, "Pre retardo del reverb en milisegundos"));
+        AddLabeledControl(table, "Amortiguación en porcentaje:", ConfigureNumeric(_reverbDamping, "Amortiguación del reverb"));
+        AddLabeledControl(table, "Difusión en porcentaje:", ConfigureNumeric(_reverbDiffusion, "Difusión del reverb"));
         return table;
     }
 
@@ -3371,9 +3376,16 @@ public sealed class MainForm : Form, IMessageFilter
         _reverbMix.AccessibleName = $"Mezcla de reverb {reverb}";
         _reverbDecay.AccessibleName = $"Duración de reverb {reverb}";
         _reverbTone.AccessibleName = $"Brillo de reverb {reverb}";
-        _reverbPreDelay.AccessibleName = $"Pre delay de reverb {reverb} en milisegundos";
-        _reverbDamping.AccessibleName = $"Damping de reverb {reverb}";
+        _reverbPreDelay.AccessibleName = $"Pre retardo de reverb {reverb} en milisegundos";
+        _reverbDamping.AccessibleName = $"Amortiguación de reverb {reverb}";
         _reverbDiffusion.AccessibleName = $"Difusión de reverb {reverb}";
+        _reverbPreDelay.AccessibleDescription = reverb == "Spring"
+            ? "En Spring, cero o pocos milisegundos dejan el rebote pegado a la nota, como un tanque físico."
+            : "Separa la señal directa del comienzo de la cola de reverb.";
+        _reverbDamping.AccessibleDescription = "Más amortiguación apaga antes los agudos de la cola; menos amortiguación la deja más brillante.";
+        _reverbDiffusion.AccessibleDescription = reverb == "Spring"
+            ? "Menos difusión deja percibir mejor los rebotes del resorte; más difusión vuelve la cola más densa."
+            : "Regula qué tan densa o separada se percibe la cola.";
 
         string chorus = _chorusCharacterCombo.SelectedIndex == 1 ? "Dimension estéreo" : "Stereo Ensemble";
         _chorusEnabled.AccessibleName = $"Activar chorus {chorus}";
@@ -3955,10 +3967,12 @@ public sealed class MainForm : Form, IMessageFilter
         _pianoStyle.SelectedIndexChanged += (_, _) => _engine.RequestMetronomeReset();
 
         _channelCombo.SelectedIndexChanged += (_, _) => HandleChannelChanged();
+        _gain.ValueChanged += (_, _) => RememberCurrentChannelEq();
         _bass.ValueChanged += (_, _) => RememberCurrentChannelEq();
         _middle.ValueChanged += (_, _) => RememberCurrentChannelEq();
         _treble.ValueChanged += (_, _) => RememberCurrentChannelEq();
         _presence.ValueChanged += (_, _) => RememberCurrentChannelEq();
+        _output.ValueChanged += (_, _) => RememberCurrentChannelEq();
 
         // Al incorporar o quitar pedales con chorus/delay activos, el loop se aparta
         // unos milisegundos para que la transición no compita con el controlador ASIO.
@@ -4008,7 +4022,10 @@ public sealed class MainForm : Form, IMessageFilter
             switch (control)
             {
                 case NumericUpDown numeric:
-                    numeric.ValueChanged += (_, _) => ScheduleParameterUpdate();
+                    numeric.ValueChanged += (_, _) =>
+                    {
+                        if (!_loadingChannelEq) ScheduleParameterUpdate();
+                    };
                     break;
                 case CheckBox checkBox:
                     checkBox.CheckedChanged += (_, _) => UpdateParameters();
@@ -4050,7 +4067,6 @@ public sealed class MainForm : Form, IMessageFilter
     private IEnumerable<Control> GetParameterControls()
     {
         yield return _simulationEnabled;
-        yield return _channelCombo;
         yield return _gain;
         yield return _bass;
         yield return _middle;
@@ -5671,16 +5687,18 @@ public sealed class MainForm : Form, IMessageFilter
 
     private void LoadChannelEqPreferences()
     {
-        StoreEqForChannel(0, _audioPreferences.CleanBass, _audioPreferences.CleanMiddle,
-            _audioPreferences.CleanTreble, _audioPreferences.CleanPresence);
-        StoreEqForChannel(1, _audioPreferences.CrunchBass, _audioPreferences.CrunchMiddle,
-            _audioPreferences.CrunchTreble, _audioPreferences.CrunchPresence);
-        StoreEqForChannel(2, _audioPreferences.LeadBass, _audioPreferences.LeadMiddle,
-            _audioPreferences.LeadTreble, _audioPreferences.LeadPresence);
-        StoreEqForChannel(3, 5.5f, 4.5f, 5.5f, 4.5f); StoreEqForChannel(4, 4.5f, 5f, 6.2f, 5.5f);
-        StoreEqForChannel(5, 5f, 6.2f, 5.4f, 5.2f); StoreEqForChannel(6, 4.8f, 6f, 6f, 5.8f);
-        StoreEqForChannel(7, 4.5f, 5.5f, 5.2f, 5.5f); StoreEqForChannel(8, 5f, 6.5f, 5f, 5.2f); StoreEqForChannel(9, 6.2f, 4.8f, 5.2f, 5.0f); StoreEqForChannel(10, 5.8f, 4.9f, 5.3f, 5.3f); StoreEqForChannel(11, 6.2f, 5.5f, 5.8f, 5.3f); StoreEqForChannel(12, 5.4f, 5.2f, 5.7f, 5.4f);
+        for (int channelIndex = 0; channelIndex < 13; channelIndex++)
+        {
+            _channelGain[channelIndex] = _audioPreferences.AmpGainByChannel[channelIndex];
+            _channelOutput[channelIndex] = _audioPreferences.AmpOutputByChannel[channelIndex];
+            _channelEq[channelIndex, 0] = _audioPreferences.AmpBassByChannel[channelIndex];
+            _channelEq[channelIndex, 1] = _audioPreferences.AmpMiddleByChannel[channelIndex];
+            _channelEq[channelIndex, 2] = _audioPreferences.AmpTrebleByChannel[channelIndex];
+            _channelEq[channelIndex, 3] = _audioPreferences.AmpPresenceByChannel[channelIndex];
+        }
+
         _rememberedChannelIndex = Math.Clamp(_channelCombo.SelectedIndex, 0, 12);
+        LoadAmpControlsFromMemory(_rememberedChannelIndex);
     }
 
     private void StoreEqForChannel(int channelIndex, float bass, float middle, float treble, float presence)
@@ -5692,6 +5710,34 @@ public sealed class MainForm : Form, IMessageFilter
         _channelEq[channelIndex, 3] = Math.Clamp(presence, 0f, 10f);
     }
 
+    private void StoreAmpControlsForChannel(int channelIndex)
+    {
+        channelIndex = Math.Clamp(channelIndex, 0, 12);
+        _channelGain[channelIndex] = Math.Clamp((float)_gain.Value, 0f, 10f);
+        _channelOutput[channelIndex] = Math.Clamp((float)_output.Value, 0f, 100f);
+        StoreEqForChannel(channelIndex,
+            (float)_bass.Value, (float)_middle.Value, (float)_treble.Value, (float)_presence.Value);
+    }
+
+    private void LoadAmpControlsFromMemory(int channelIndex)
+    {
+        channelIndex = Math.Clamp(channelIndex, 0, 12);
+        _loadingChannelEq = true;
+        try
+        {
+            SetNumeric(_gain, _channelGain[channelIndex]);
+            SetNumeric(_bass, _channelEq[channelIndex, 0]);
+            SetNumeric(_middle, _channelEq[channelIndex, 1]);
+            SetNumeric(_treble, _channelEq[channelIndex, 2]);
+            SetNumeric(_presence, _channelEq[channelIndex, 3]);
+            SetNumeric(_output, _channelOutput[channelIndex]);
+        }
+        finally
+        {
+            _loadingChannelEq = false;
+        }
+    }
+
     private void RememberCurrentChannelEq(bool force = false)
     {
         if (!force && (_loadingScene || _loadingChannelEq))
@@ -5699,9 +5745,7 @@ public sealed class MainForm : Form, IMessageFilter
             return;
         }
 
-        int channelIndex = Math.Clamp(_channelCombo.SelectedIndex, 0, 12);
-        StoreEqForChannel(channelIndex,
-            (float)_bass.Value, (float)_middle.Value, (float)_treble.Value, (float)_presence.Value);
+        StoreAmpControlsForChannel(Math.Clamp(_channelCombo.SelectedIndex, 0, 12));
     }
 
     private void HandleChannelChanged()
@@ -5718,29 +5762,16 @@ public sealed class MainForm : Form, IMessageFilter
             return;
         }
 
-        // Antes de salir del canal actual se conserva su ecualización.
-        int previousChannel = Math.Clamp(_rememberedChannelIndex, 0, 12);
-        StoreEqForChannel(previousChannel,
-            (float)_bass.Value, (float)_middle.Value, (float)_treble.Value, (float)_presence.Value);
-
-        _loadingChannelEq = true;
-        try
-        {
-            SetNumeric(_bass, _channelEq[newChannelIndex, 0]);
-            SetNumeric(_middle, _channelEq[newChannelIndex, 1]);
-            SetNumeric(_treble, _channelEq[newChannelIndex, 2]);
-            SetNumeric(_presence, _channelEq[newChannelIndex, 3]);
-        }
-        finally
-        {
-            _loadingChannelEq = false;
-        }
-
+        // Guarda primero el amplificador que se deja y luego restaura el nuevo completo.
+        StoreAmpControlsForChannel(Math.Clamp(_rememberedChannelIndex, 0, 12));
+        LoadAmpControlsFromMemory(newChannelIndex);
         _rememberedChannelIndex = newChannelIndex;
-        ScheduleParameterUpdate();
+
+        // Se aplica una sola foto completa al DSP; no quedan valores del amplificador anterior.
+        UpdateParameters();
 
         string channelName = _channelCombo.SelectedItem?.ToString() ?? $"Canal {newChannelIndex + 1}";
-        SetStatus($"{channelName}. Ecualización propia cargada: bajos {_bass.Value:0.0}, medios {_middle.Value:0.0}, agudos {_treble.Value:0.0}, presencia {_presence.Value:0.0}.");
+        SetStatus($"{channelName}. Ganancia {_gain.Value:0.0}; bajos {_bass.Value:0.0}; medios {_middle.Value:0.0}; agudos {_treble.Value:0.0}; presencia {_presence.Value:0.0}; volumen del amplificador {_output.Value:0} por ciento.");
     }
 
     private void LoadTunerPreference()
@@ -7506,6 +7537,20 @@ public sealed class MainForm : Form, IMessageFilter
         _audioPreferences.LeadMiddle = _channelEq[2, 1];
         _audioPreferences.LeadTreble = _channelEq[2, 2];
         _audioPreferences.LeadPresence = _channelEq[2, 3];
+
+        _audioPreferences.AmpGainByChannel = (float[])_channelGain.Clone();
+        _audioPreferences.AmpOutputByChannel = (float[])_channelOutput.Clone();
+        _audioPreferences.AmpBassByChannel = new float[13];
+        _audioPreferences.AmpMiddleByChannel = new float[13];
+        _audioPreferences.AmpTrebleByChannel = new float[13];
+        _audioPreferences.AmpPresenceByChannel = new float[13];
+        for (int channelIndex = 0; channelIndex < 13; channelIndex++)
+        {
+            _audioPreferences.AmpBassByChannel[channelIndex] = _channelEq[channelIndex, 0];
+            _audioPreferences.AmpMiddleByChannel[channelIndex] = _channelEq[channelIndex, 1];
+            _audioPreferences.AmpTrebleByChannel[channelIndex] = _channelEq[channelIndex, 2];
+            _audioPreferences.AmpPresenceByChannel[channelIndex] = _channelEq[channelIndex, 3];
+        }
 
         _audioPreferences.VoiceEnabled = _voiceEnabled.Checked;
         _audioPreferences.VoiceOnlyMode = _voiceOnlyMode.Checked;
