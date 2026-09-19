@@ -142,7 +142,7 @@ internal sealed class AmpModel
             case AmpChannel.LeadTripleChannelModern:
                 // 2.41.83: la toma real mostro mas ataque y medios-altos que Classic,
                 // aun con menor nivel. Se aprietan graves sin aumentar la compresion.
-                baseMidDb=1.3f; highPass=66f; lowPass=6350f; midFrequency=860f; preVoiceDb=1.9f;
+                baseMidDb=1.8f; highPass=66f; lowPass=6350f; midFrequency=930f; preVoiceDb=2.7f;
                 stageHighPass=96f; stage1LowPass=9000f; stage2LowPass=6700f; stage3LowPass=5400f; _makeup=.55f; break;
             case AmpChannel.TripleChannelClean:
                 // Limpio grande y con cuerpo, guiado por la toma real: mantiene headroom
@@ -175,7 +175,7 @@ internal sealed class AmpModel
         {
             AmpChannel.CleanTwin => 760f,
             AmpChannel.CrunchBritish => 980f,
-            AmpChannel.CleanBoutique => 620f, AmpChannel.CleanClassA => 1100f, AmpChannel.CrunchPlexi => 850f, AmpChannel.CrunchClassA => 1150f, AmpChannel.LeadModern => 1050f, AmpChannel.LeadLegacy => 800f, AmpChannel.LeadTripleChannel => 720f, AmpChannel.LeadTripleChannelModern => 900f, AmpChannel.TripleChannelClean => 720f, AmpChannel.TripleChannelCleanCrunch => 1050f,
+            AmpChannel.CleanBoutique => 620f, AmpChannel.CleanClassA => 1100f, AmpChannel.CrunchPlexi => 850f, AmpChannel.CrunchClassA => 1150f, AmpChannel.LeadModern => 1050f, AmpChannel.LeadLegacy => 800f, AmpChannel.LeadTripleChannel => 720f, AmpChannel.LeadTripleChannelModern => 1020f, AmpChannel.TripleChannelClean => 720f, AmpChannel.TripleChannelCleanCrunch => 1050f,
             _ => 860f
         };
         _preVoice.SetPeak(_sampleRate, preVoiceFrequency, 0.78f, preVoiceDb);

@@ -458,6 +458,22 @@ public sealed class MainForm : Form, IMessageFilter
     private readonly Button _practiceStopButton = new();
     private readonly Button _practiceOpenFolderButton = new();
     private readonly TextBox _practiceRecordingStatus = new();
+
+    // 2.41.86: captura NAM del amplificador real sin DAW. Usa motor ASIO separado.
+    private readonly NamCaptureEngine _namCaptureEngine = new();
+    private CancellationTokenSource? _namCaptureCancellation;
+    private readonly TextBox _namCaptureInputPath = new();
+    private readonly Button _namCaptureBrowseButton = new();
+    private readonly TextBox _namCaptureName = new();
+    private readonly ComboBox _namCaptureOutputCombo = new();
+    private readonly ComboBox _namCaptureReturnInputCombo = new();
+    private readonly NumericUpDown _namCaptureSendDb = CreateDecimalControl(-60, 0, -30, 1m, decimals: 0);
+    private readonly CheckBox _namCaptureSafetyConfirmed = new();
+    private readonly Button _namCaptureTestButton = new();
+    private readonly Button _namCaptureStartButton = new();
+    private readonly Button _namCaptureStopButton = new();
+    private readonly Button _namCaptureOpenFolderButton = new();
+    private readonly TextBox _namCaptureStatus = new();
     private readonly CheckBox _loopSyncTempo = new();
     private readonly ComboBox _loopSourceCombo = new();
     private readonly ComboBox _loopBars = new();
@@ -755,6 +771,7 @@ public sealed class MainForm : Form, IMessageFilter
         var toolsContent = CreateTabContent();
         toolsContent.Controls.Add(BuildTunerGroup());
         toolsContent.Controls.Add(BuildMetronomeGroup());
+        toolsContent.Controls.Add(BuildNamCaptureGroup());
         toolsTab.Controls.Add(toolsContent);
 
         var microphoneContent = CreateTabContent();
@@ -2480,6 +2497,208 @@ public sealed class MainForm : Form, IMessageFilter
         return group;
     }
 
+    private Control BuildNamCaptureGroup()
+    {
+        var group = CreateGroup("Captura NAM de amplificador real");
+        var table = CreateTwoColumnTable();
+        group.Controls.Add(table);
+
+        var warning = new Label
+        {
+            AutoSize = true,
+            MaximumSize = new Size(760, 0),
+            Text = "Modo de captura cruda: input.wav sale por una salida ASIO directamente al amplificador real y el retorno de la load box se graba desde una entrada ASIO. No pasa por ampli interno, NAM, IR, efectos, master, voz ni Loopback. El retorno no se monitoriza. El cabezal valvular debe estar conectado a una carga correcta antes de iniciar.",
+            AccessibleName = "Advertencia de seguridad de Captura NAM",
+            AccessibleDescription = "No conecte nunca la salida de parlante del cabezal a la Focusrite. Use solamente la salida de línea o DI de una load box correctamente conectada."
+        };
+        AddLabeledControl(table, "Seguridad:", warning);
+
+        _namCaptureSafetyConfirmed.Text = "&Confirmo load box correcta, retorno LINE o DI y Direct Monitor apagado";
+        _namCaptureSafetyConfirmed.AccessibleName = "Confirmar conexión segura para captura NAM";
+        _namCaptureSafetyConfirmed.AccessibleDescription = "Marque solamente después de verificar que el cabezal tiene la carga e impedancia correctas, que la Focusrite recibe una salida LINE o DI de la load box y que Direct Monitor está apagado.";
+        AddLabeledControl(table, "Confirmación:", _namCaptureSafetyConfirmed);
+
+        _namCaptureInputPath.ReadOnly = true;
+        _namCaptureInputPath.Dock = DockStyle.Fill;
+        _namCaptureInputPath.Text = "Ningún input.wav seleccionado.";
+        _namCaptureInputPath.AccessibleName = "Archivo de entrenamiento NAM seleccionado";
+        AddLabeledControl(table, "Archivo de entrenamiento:", _namCaptureInputPath);
+        _namCaptureBrowseButton.Text = "&Elegir input.wav";
+        _namCaptureBrowseButton.AccessibleName = "Elegir archivo input.wav para Captura NAM";
+        AddLabeledControl(table, "Seleccionar archivo:", _namCaptureBrowseButton);
+
+        _namCaptureName.Text = "Vintage_Modern";
+        _namCaptureName.Dock = DockStyle.Fill;
+        _namCaptureName.AccessibleName = "Nombre de la captura NAM";
+        _namCaptureName.AccessibleDescription = "Ejemplo: Vintage Modern, Vintage Classic, Vintage Clean o Vintage Clean Crunch.";
+        AddLabeledControl(table, "&Nombre de captura:", _namCaptureName);
+
+        ConfigureCombo(_namCaptureOutputCombo, "Salida ASIO de envío para Captura NAM",
+            "Esta salida física se conecta a la entrada del amplificador o a una caja de reamp. Empiece con el volumen físico de salida completamente abajo.");
+        AddLabeledControl(table, "&Salida de envío:", _namCaptureOutputCombo);
+
+        ConfigureCombo(_namCaptureReturnInputCombo, "Entrada ASIO de retorno de la load box",
+            "Seleccione la entrada LINE de la Focusrite donde está conectado LINE OUT o DI OUT de la load box.");
+        AddLabeledControl(table, "&Entrada de retorno:", _namCaptureReturnInputCombo);
+
+        ConfigureNumeric(_namCaptureSendDb, "Atenuación digital de envío NAM en decibelios");
+        _namCaptureSendDb.AccessibleDescription = "Rango menos 60 a 0 dB. Empieza en menos 30 dB por seguridad. Además, comience con el control físico Output de la Focusrite completamente abajo y súbalo lentamente.";
+        AddLabeledControl(table, "&Atenuación de envío, menos 60 a 0 dB:", _namCaptureSendDb);
+
+        var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
+        _namCaptureTestButton.Text = "Comprobar &nivel, 5 segundos";
+        _namCaptureTestButton.AccessibleName = "Comprobar nivel de retorno durante cinco segundos";
+        _namCaptureStartButton.Text = "&Iniciar captura completa";
+        _namCaptureStartButton.AccessibleName = "Iniciar captura NAM completa";
+        _namCaptureStopButton.Text = "&Detener captura";
+        _namCaptureStopButton.AccessibleName = "Detener captura NAM";
+        _namCaptureStopButton.Enabled = false;
+        _namCaptureOpenFolderButton.Text = "Abrir &carpeta de capturas";
+        _namCaptureOpenFolderButton.AccessibleName = "Abrir carpeta de Capturas NAM";
+        actions.Controls.AddRange(new Control[] { _namCaptureTestButton, _namCaptureStartButton, _namCaptureStopButton, _namCaptureOpenFolderButton });
+        AddLabeledControl(table, "Acciones:", actions);
+
+        _namCaptureStatus.ReadOnly = true;
+        _namCaptureStatus.Multiline = true;
+        _namCaptureStatus.ScrollBars = ScrollBars.Vertical;
+        _namCaptureStatus.Height = 100;
+        _namCaptureStatus.Dock = DockStyle.Fill;
+        _namCaptureStatus.Text = "Captura NAM detenida. Seleccione input.wav, compruebe conexiones y haga primero una prueba de nivel.";
+        _namCaptureStatus.AccessibleName = "Estado de Captura NAM";
+        AddLabeledControl(table, "Estado:", _namCaptureStatus);
+        return group;
+    }
+
+    private void RefreshNamCaptureChannels()
+    {
+        int previousOutput = _namCaptureOutputCombo.SelectedIndex;
+        int previousInput = _namCaptureReturnInputCombo.SelectedIndex;
+        _namCaptureOutputCombo.Items.Clear();
+        _namCaptureReturnInputCombo.Items.Clear();
+        string? driver = _driverCombo.SelectedItem?.ToString();
+        if (string.IsNullOrWhiteSpace(driver)) return;
+        try
+        {
+            AsioDeviceInfo info = AudioEngine.GetDeviceInfo(driver);
+            for (int i = 0; i < info.OutputCount; i++) _namCaptureOutputCombo.Items.Add($"{i + 1}: salida ASIO {i + 1}");
+            foreach (string input in info.InputChannels) _namCaptureReturnInputCombo.Items.Add(input);
+            if (_namCaptureOutputCombo.Items.Count > 0) _namCaptureOutputCombo.SelectedIndex = Math.Clamp(previousOutput < 0 ? 0 : previousOutput, 0, _namCaptureOutputCombo.Items.Count - 1);
+            if (_namCaptureReturnInputCombo.Items.Count > 0) _namCaptureReturnInputCombo.SelectedIndex = Math.Clamp(previousInput < 0 ? 0 : previousInput, 0, _namCaptureReturnInputCombo.Items.Count - 1);
+        }
+        catch (Exception ex) { _namCaptureStatus.Text = $"No se pudieron consultar los canales para Captura NAM: {ex.Message}"; }
+    }
+
+    private void ChooseNamCaptureInput()
+    {
+        if (_namCaptureEngine.IsRunning) return;
+        using var dialog = new OpenFileDialog
+        {
+            Title = "Elegir input.wav de entrenamiento NAM",
+            Filter = "Archivo WAV (*.wav)|*.wav|Todos los archivos (*.*)|*.*",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        _namCaptureInputPath.Text = dialog.FileName;
+        _namCaptureInputPath.AccessibleName = $"Archivo de entrenamiento NAM: {Path.GetFileName(dialog.FileName)}";
+        SetStatus($"Archivo para Captura NAM seleccionado: {Path.GetFileName(dialog.FileName)}.");
+    }
+
+    private async Task RunNamCaptureAsync(bool levelTest)
+    {
+        if (_namCaptureEngine.IsRunning) return;
+        if (_audioRequested || _engine.HasActiveSession)
+        {
+            SetStatus("Para Captura NAM detenga primero el audio normal con F4. La captura usa ASIO de forma exclusiva.", true);
+            return;
+        }
+        if (!_namCaptureSafetyConfirmed.Checked)
+        {
+            SetStatus("Antes de capturar confirme load box, retorno LINE o DI y Direct Monitor apagado.", true);
+            _namCaptureSafetyConfirmed.Focus();
+            return;
+        }
+        string? driver = _driverCombo.SelectedItem?.ToString();
+        if (string.IsNullOrWhiteSpace(driver)) { SetStatus("Seleccione primero el controlador ASIO.", true); return; }
+        if (!File.Exists(_namCaptureInputPath.Text)) { SetStatus("Seleccione primero input.wav de entrenamiento NAM.", true); _namCaptureBrowseButton.Focus(); return; }
+        if (_namCaptureOutputCombo.SelectedIndex < 0 || _namCaptureReturnInputCombo.SelectedIndex < 0) { SetStatus("Seleccione salida de envío y entrada de retorno para Captura NAM.", true); return; }
+
+        _namCaptureCancellation?.Dispose();
+        _namCaptureCancellation = new CancellationTokenSource();
+        SetNamCaptureRunningState(true);
+        string action = levelTest ? "Prueba de nivel NAM" : "Captura NAM completa";
+        _namCaptureStatus.Text = $"{action} en curso. No toque controles del Vintage, Focusrite ni load box.";
+        SetStatus($"{action} iniciada. El retorno no se monitoriza.");
+
+        try
+        {
+            var request = new NamCaptureRequest(driver, _namCaptureOutputCombo.SelectedIndex, _namCaptureReturnInputCombo.SelectedIndex,
+                _namCaptureInputPath.Text, _namCaptureName.Text, (float)_namCaptureSendDb.Value, levelTest);
+            NamCaptureResult result = await _namCaptureEngine.CaptureAsync(request, _namCaptureCancellation.Token);
+            string assessment = result.ClippedSamples > 0
+                ? $"CLIPPING detectado en {result.ClippedSamples} muestras. Baje la ganancia del retorno y repita."
+                : result.PeakDbfs < -36.0 ? "Retorno muy bajo. Revise nivel de envío o ganancia de entrada."
+                : result.PeakDbfs > -3.0 ? "Retorno alto y con poco margen. Conviene bajar un poco la ganancia de entrada."
+                : "Nivel de retorno correcto y sin clipping detectado.";
+            string message = levelTest
+                ? $"Prueba de nivel terminada. Pico {result.PeakDbfs:0.0} dBFS. {assessment}"
+                : $"Captura NAM terminada. Duración {result.Seconds:0.0} segundos. Pico {result.PeakDbfs:0.0} dBFS. {assessment} Archivos guardados en {result.Folder}.";
+            _namCaptureStatus.Text = message;
+            SetStatus(message, result.ClippedSamples > 0);
+        }
+        catch (OperationCanceledException)
+        {
+            _namCaptureStatus.Text = "Captura NAM detenida por el usuario. No se guardó una captura incompleta.";
+            SetStatus("Captura NAM detenida.");
+        }
+        catch (Exception ex)
+        {
+            _namCaptureStatus.Text = $"Error de Captura NAM: {ex.Message}";
+            SetStatus($"Error de Captura NAM: {ex.Message}", true);
+        }
+        finally
+        {
+            SetNamCaptureRunningState(false);
+            _namCaptureCancellation?.Dispose();
+            _namCaptureCancellation = null;
+        }
+    }
+
+    private void StopNamCapture()
+    {
+        if (!_namCaptureEngine.IsRunning) return;
+        _namCaptureCancellation?.Cancel();
+        _namCaptureEngine.RequestStop();
+    }
+
+    private void SetNamCaptureRunningState(bool running)
+    {
+        _namCaptureBrowseButton.Enabled = !running;
+        _namCaptureName.Enabled = !running;
+        _namCaptureOutputCombo.Enabled = !running;
+        _namCaptureReturnInputCombo.Enabled = !running;
+        _namCaptureSendDb.Enabled = !running;
+        _namCaptureSafetyConfirmed.Enabled = !running;
+        _namCaptureTestButton.Enabled = !running;
+        _namCaptureStartButton.Enabled = !running;
+        _namCaptureStopButton.Enabled = running;
+        _driverCombo.Enabled = !running;
+        _inputCombo.Enabled = !running;
+        _refreshDriversButton.Enabled = !running;
+        _asioPanelButton.Enabled = !running;
+        _startStopButton.Enabled = !running;
+    }
+
+    private void OpenNamCaptureFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(NamCaptureEngine.CaptureFolder);
+            Process.Start(new ProcessStartInfo { FileName = NamCaptureEngine.CaptureFolder, UseShellExecute = true });
+            SetStatus("Carpeta de Capturas NAM abierta.");
+        }
+        catch (Exception ex) { SetStatus($"No se pudo abrir la carpeta de Capturas NAM: {ex.Message}", true); }
+    }
     private Control BuildMetronomeGroup()
     {
         var group = CreateGroup("Metrónomo, batería, bajo, piano y órgano de acompañamiento");
@@ -3772,7 +3991,11 @@ public sealed class MainForm : Form, IMessageFilter
         _refreshDriversButton.Click += (_, _) => LoadDrivers(announce: true);
         _driverCombo.SelectedIndexChanged += (_, _) =>
         {
-            if (!_loadingAudioDeviceSelection) LoadInputs(announce: true);
+            if (!_loadingAudioDeviceSelection)
+            {
+                LoadInputs(announce: true);
+                RefreshNamCaptureChannels();
+            }
         };
         _inputCombo.SelectedIndexChanged += (_, _) =>
         {
@@ -3881,6 +4104,11 @@ public sealed class MainForm : Form, IMessageFilter
         _practiceRecordButton.Click += (_, _) => StartPracticeRecording();
         _practiceStopButton.Click += async (_, _) => await FinalizePracticeRecordingAsync(autoCompleted: false);
         _practiceOpenFolderButton.Click += (_, _) => OpenPracticeRecordingsFolder();
+        _namCaptureBrowseButton.Click += (_, _) => ChooseNamCaptureInput();
+        _namCaptureTestButton.Click += async (_, _) => await RunNamCaptureAsync(levelTest: true);
+        _namCaptureStartButton.Click += async (_, _) => await RunNamCaptureAsync(levelTest: false);
+        _namCaptureStopButton.Click += (_, _) => StopNamCapture();
+        _namCaptureOpenFolderButton.Click += (_, _) => OpenNamCaptureFolder();
         _loopRecordButton.Click += (_, _) => ToggleLoopFirstPass();
         _loopOverdubButton.Click += (_, _) => ToggleLoopOverdub();
         _loopUndoButton.Click += (_, _) => UndoLastLoopOverdub();
@@ -4058,6 +4286,12 @@ public sealed class MainForm : Form, IMessageFilter
             Application.RemoveMessageFilter(this);
             TrySaveSceneLibrary();
             SaveAudioPreferences();
+            try
+            {
+                _namCaptureCancellation?.Cancel();
+                _namCaptureEngine.Dispose();
+            }
+            catch { }
             _voicemeeter.Dispose();
             _engine.Dispose();
         };
@@ -5435,6 +5669,7 @@ public sealed class MainForm : Form, IMessageFilter
         }
 
         LoadInputs(announce);
+        RefreshNamCaptureChannels();
     }
 
     private void LoadInputs(bool announce = true)
@@ -5527,6 +5762,12 @@ public sealed class MainForm : Form, IMessageFilter
 
     private void ToggleAudio()
     {
+        if (_namCaptureEngine.IsRunning)
+        {
+            SetStatus("Captura NAM en curso. Deténgala antes de iniciar el audio normal.", true);
+            return;
+        }
+
         if (_audioRequested || _engine.HasActiveSession)
         {
             CaptureAudioTelemetry();

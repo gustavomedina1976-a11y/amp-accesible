@@ -1,3 +1,17 @@
+Amp Accessible 2.41.86 - Captura NAM Accesible y Modern Medios Previos JAWS
+Base estable: 2.41.85 (5d513485).
+- Herramientas incorpora Captura NAM de amplificador real, operable con teclado y JAWS, sin REAPER ni otra DAW.
+- Motor ASIO separado: exige audio normal detenido y no pasa por ampli interno, NAM, IR, efectos, master, voz, Loopback, acompanamiento ni looper.
+- Seleccion de input.wav, salida ASIO de envio, entrada de retorno, nombre y atenuacion de -60 a 0 dB; inicial -30 dB.
+- Confirmacion obligatoria de load box correcta, retorno LINE/DI y Direct Monitor apagado.
+- Prueba de nivel de 5 segundos anuncia pico dBFS y clipping.
+- Captura completa guarda input_original.wav, input_enviado.wav, output_capturado.wav e informe_captura.txt.
+- El retorno se graba pero nunca se reenvia a ninguna salida ASIO.
+- WAV de captura: mono, 48 kHz, 24 bits.
+- Modern: pre-voicing 1020 Hz / +2.7 dB, centro de medios 930 Hz, base +1.8 dB y F34 Middle 5.3. Gain 7.0 y Output 33.5 se conservan.
+- Classic, Clean, Clean Crunch y reverbs permanecen sin cambios.
+- Publicacion: incremental Amp_Accessible_2.41.85_a_2.41.86.gdmupdate mas Setup, Publicacion.zip y update-channel.json.
+
 Amp Accessible 2.41.85 - Triple Channel Modern Armonicos Valvulares JAWS
 Base estable: 2.41.84 (f60d4a21).
 - Cambio exclusivo en Canal 11 Triple Channel Modern.
