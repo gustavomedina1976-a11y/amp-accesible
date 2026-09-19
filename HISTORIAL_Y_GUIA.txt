@@ -1,3 +1,13 @@
+Amp Accessible 2.41.87 - Captura y Entrenamiento NAM Integrados Bancos JAWS
+Base estable: 2.41.86 (c08e1732).
+- Nueva sección Alt+R: Captura y entrenamiento NAM.
+- Herramientas vuelve a quedar más corto.
+- Captura y entrenamiento quedan integrados en una misma sección.
+- Puede instalar o actualizar el entrenador NAM oficial desde Amp Accessible.
+- Entrenamiento usa input_original.wav y output_capturado.wav; input_enviado.wav queda como registro físico.
+- El .nam generado se incorpora automáticamente al Banco NAM y queda cargado.
+- Flechas del Banco de fábrica vuelven a aplicar un solo banco por pulsación y conservan el foco de JAWS.
+- DSP, amplificadores, reverbs, perfiles de clase y Loopback no cambian.
 Amp Accessible 2.41.86 - Captura NAM Accesible y Modern Medios Previos JAWS
 Base estable: 2.41.85 (5d513485).
 - Herramientas incorpora Captura NAM de amplificador real, operable con teclado y JAWS, sin REAPER ni otra DAW.
@@ -61,7 +71,7 @@ Base estable: 2.41.81 (b0e26c84).
 - Si hay un IR A externo cargado al activar Cabezal Externo, se activa automaticamente. El diagnostico informa si falta un IR externo.
 - El modo no altera ni borra ajustes de amplificadores, NAM o pedales: al desactivarlo se restaura la cadena normal.
 - F33 Triple Channel Classic y F34 Triple Channel Modern permanecen intactos.
-- Perfiles de clase, voz, Loopback, dos guitarras, acompañamiento, grabadora y UpdateService quedan sin cambios.
+- Perfiles de clase, voz, Loopback, dos guitarras, acompaÃ±amiento, grabadora y UpdateService quedan sin cambios.
 - Publicacion: unico incremental Amp_Accessible_2.41.81_a_2.41.82.gdmupdate, mas Setup, Publicacion.zip y update-channel.json.
 
 Amp Accessible 2.41.81 - Triple Channel Classic Modern JAWS
@@ -147,9 +157,9 @@ Base estable aprobada: 2.41.74 (aae68c1).
 - 25 pares de cambios de preset comprobados offline, incluidos F33 -> F34 -> F35 -> F36 -> F37 -> F33: salida finita, salto adyacente maximo 0,015227 cerca del cambio. Escenas guardadas/recuperadas, independencia G1/G2, IR A/B, EQ, volumen, mezcla, paneo y master verificados. Sin certificacion auditiva de clicks.
 - Rendimiento offline 48 kHz/128: 0 bytes asignados y 0 plazos excedidos en 10.000 bloques medidos. Release: 0 errores y 7 advertencias preexistentes. Pruebas reproducibles en Installer/Tests/Validate-CleanBank.ps1; no sustituyen Focusrite/JAWS real.
 - Workflow simplificado: consulta metadatos de releases estables y elige la mayor version semantica menor que la actual, sin restar un parche. Descarga y compara un solo ZIP; genera solamente Amp_Accessible_2.41.74_a_2.41.75.gdmupdate, junto a Setup, Publicacion.zip y update-channel.json con HTTPS y SHA-256. Con las 17 releases anteriores disponibles elimina 16 descargas/extracciones/comparaciones/paquetes (94,1 por ciento de esas operaciones).
-- Cada release genera un paquete incremental desde la versión publicada inmediatamente anterior. Usuarios con versiones más antiguas deben instalar la versión completa. UpdateService y la logica del instalador permanecen intactos; el instalador completo se conserva. Pruebas aisladas del actualizador verifican seleccion exacta, rechazo de version incorrecta y SHA-256 corrupto, y conservacion de NAM, IR, presets, escenas y ajustes personales.
+- Cada release genera un paquete incremental desde la versiÃ³n publicada inmediatamente anterior. Usuarios con versiones mÃ¡s antiguas deben instalar la versiÃ³n completa. UpdateService y la logica del instalador permanecen intactos; el instalador completo se conserva. Pruebas aisladas del actualizador verifican seleccion exacta, rechazo de version incorrecta y SHA-256 corrupto, y conservacion de NAM, IR, presets, escenas y ajustes personales.
 - Version y BuildName sincronizados en aplicacion, ensamblado e instalador.
-Pendiente validación perceptiva con guitarra real, Focusrite USB ASIO 48 kHz / buffer 128.
+Pendiente validaciÃ³n perceptiva con guitarra real, Focusrite USB ASIO 48 kHz / buffer 128.
 
 Amp Accessible 2.41.74 - Clean Dedicado JAWS
 Base estable aprobada: 2.41.73 (4afe8f7).
@@ -221,19 +231,19 @@ Base estable: 2.41.68 (33764f0).
 
 Amp Accessible 2.41.68 - Piano Leslie Estereo y Ride Natural JAWS
 Base estable: 2.41.67 (dc53154).
-- Bajo y piano comparten las mismas 24 tonalidades mayores/menores. Sol mayor sigue en índice 7. El bajo conserva key 0..11 y minor booleano en preferencias, bancos y escenas, incluidas las completas de Dos Guitarras.
-- Piano Worship: aproximadamente +2 dB de cuerpo sostenido, con aumento progresivo desde 30 ms. Grand Piano: aproximadamente +2,2 dB sostenidos, martillo más suave, tabla armónica reforzada, cuerdas más largas y pico controlado. Acústico y Rhodes conservados.
-- Hammond lento/rápido: Leslie estéreo de dos bandas, con amplitud y retardos fraccionales variables por canal. Salida estéreo en todas las rutas normales y de Dos Guitarras; batería, bajo y metrónomo centrados.
-- Ride: baqueta corta y filtrada, tres resonancias inarmónicas variables y wash persistente de energía limitada que no se corta con cada golpe. Se conserva el volumen general, los patrones y el microtiming de batería; al agotarse la energía deja de procesarse.
-- Se conserva íntegro Audio/PracticeRecorder.cs y toda la telemetría de grabación de 2.41.67. Sin cambios en modelos persistentes, NAM, IR, amplificadores, efectos de guitarra, afinador, looper ni lógica de seguimiento F12.
-Validación: compilación Release sin errores; 24 conversiones ida/vuelta; piano/Leslie y ride a 8000, 44100, 48000 y 96000 Hz; señal finita, techo de salida, silencio al desactivar/resetear, separación estéreo, cola y solapamiento de ride; sin asignaciones de memoria en el procesamiento probado.
-Pendiente de validación perceptual: escucha en interfaz de audio y navegación con JAWS. Las pruebas numéricas no sustituyen estas comprobaciones.
+- Bajo y piano comparten las mismas 24 tonalidades mayores/menores. Sol mayor sigue en Ã­ndice 7. El bajo conserva key 0..11 y minor booleano en preferencias, bancos y escenas, incluidas las completas de Dos Guitarras.
+- Piano Worship: aproximadamente +2 dB de cuerpo sostenido, con aumento progresivo desde 30 ms. Grand Piano: aproximadamente +2,2 dB sostenidos, martillo mÃ¡s suave, tabla armÃ³nica reforzada, cuerdas mÃ¡s largas y pico controlado. AcÃºstico y Rhodes conservados.
+- Hammond lento/rÃ¡pido: Leslie estÃ©reo de dos bandas, con amplitud y retardos fraccionales variables por canal. Salida estÃ©reo en todas las rutas normales y de Dos Guitarras; baterÃ­a, bajo y metrÃ³nomo centrados.
+- Ride: baqueta corta y filtrada, tres resonancias inarmÃ³nicas variables y wash persistente de energÃ­a limitada que no se corta con cada golpe. Se conserva el volumen general, los patrones y el microtiming de baterÃ­a; al agotarse la energÃ­a deja de procesarse.
+- Se conserva Ã­ntegro Audio/PracticeRecorder.cs y toda la telemetrÃ­a de grabaciÃ³n de 2.41.67. Sin cambios en modelos persistentes, NAM, IR, amplificadores, efectos de guitarra, afinador, looper ni lÃ³gica de seguimiento F12.
+ValidaciÃ³n: compilaciÃ³n Release sin errores; 24 conversiones ida/vuelta; piano/Leslie y ride a 8000, 44100, 48000 y 96000 Hz; seÃ±al finita, techo de salida, silencio al desactivar/resetear, separaciÃ³n estÃ©reo, cola y solapamiento de ride; sin asignaciones de memoria en el procesamiento probado.
+Pendiente de validaciÃ³n perceptual: escucha en interfaz de audio y navegaciÃ³n con JAWS. Las pruebas numÃ©ricas no sustituyen estas comprobaciones.
 
-Amp Accessible 2.41.58 - Actualizaciones GitHub Automáticas JAWS
-NOVEDAD 2.41.58: se incorpora el flujo de publicación automática mediante GitHub Actions y GitHub Releases. Al publicar una versión nueva, GitHub puede compilar Windows x64 autocontenido, generar el instalador, crear paquetes incrementales .gdmupdate y publicar update-channel.json con verificación SHA-256.
-NOVEDAD 2.41.58: las compilaciones generadas por GitHub reciben automáticamente el canal HTTPS del repositorio. El botón Buscar actualizaciones puede usar ese canal sin editar manualmente la publicación.
-IMPORTANTE 2.41.58: no se modifica ningún algoritmo de audio. Batería, bajo, piano, Hammond, amplificadores, NAM, IR, efectos, escenas, F12 y looper quedan exactamente sobre la base estable 2.41.57.
+Amp Accessible 2.41.58 - Actualizaciones GitHub AutomÃ¡ticas JAWS
+NOVEDAD 2.41.58: se incorpora el flujo de publicaciÃ³n automÃ¡tica mediante GitHub Actions y GitHub Releases. Al publicar una versiÃ³n nueva, GitHub puede compilar Windows x64 autocontenido, generar el instalador, crear paquetes incrementales .gdmupdate y publicar update-channel.json con verificaciÃ³n SHA-256.
+NOVEDAD 2.41.58: las compilaciones generadas por GitHub reciben automÃ¡ticamente el canal HTTPS del repositorio. El botÃ³n Buscar actualizaciones puede usar ese canal sin editar manualmente la publicaciÃ³n.
+IMPORTANTE 2.41.58: no se modifica ningÃºn algoritmo de audio. BaterÃ­a, bajo, piano, Hammond, amplificadores, NAM, IR, efectos, escenas, F12 y looper quedan exactamente sobre la base estable 2.41.57.
 
-Amp Accessible 2.41.57 - Batería Fraseo Humano y Fills de Toms JAWS
-NOVEDAD 2.41.57: el patrón deja de repetirse de forma idéntica. Rock, Worship y Pop alternan discretamente algunos golpes secundarios de bombo entre compases, sin cambiar el pulso principal.
-NOVEDAD 2.41.57: se agrega respiración dinámica de cuatro compases, fills suaves de caja en el cuarto compás y un recorrido de tom alto, medio y piso sólo cada ocho compases.
+Amp Accessible 2.41.57 - BaterÃ­a Fraseo Humano y Fills de Toms JAWS
+NOVEDAD 2.41.57: el patrÃ³n deja de repetirse de forma idÃ©ntica. Rock, Worship y Pop alternan discretamente algunos golpes secundarios de bombo entre compases, sin cambiar el pulso principal.
+NOVEDAD 2.41.57: se agrega respiraciÃ³n dinÃ¡mica de cuatro compases, fills suaves de caja en el cuarto compÃ¡s y un recorrido de tom alto, medio y piso sÃ³lo cada ocho compases.

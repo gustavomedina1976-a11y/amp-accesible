@@ -474,6 +474,19 @@ public sealed class MainForm : Form, IMessageFilter
     private readonly Button _namCaptureStopButton = new();
     private readonly Button _namCaptureOpenFolderButton = new();
     private readonly TextBox _namCaptureStatus = new();
+    private readonly NamTrainerService _namTrainerService = new();
+    private CancellationTokenSource? _namTrainingCancellation;
+    private readonly TextBox _namTrainingCaptureFolder = new();
+    private readonly Button _namTrainingChooseFolderButton = new();
+    private readonly TextBox _namTrainingModelName = new();
+    private readonly NumericUpDown _namTrainingEpochs = CreateDecimalControl(10, 300, 100, 10m, decimals: 0);
+    private readonly Button _namTrainingCheckButton = new();
+    private readonly Button _namTrainingInstallButton = new();
+    private readonly Button _namTrainingStartButton = new();
+    private readonly Button _namTrainingCancelButton = new();
+    private readonly Button _namTrainingLoadButton = new();
+    private readonly TextBox _namTrainingStatus = new();
+    private string? _lastTrainedNamPath;
     private readonly CheckBox _loopSyncTempo = new();
     private readonly ComboBox _loopSourceCombo = new();
     private readonly ComboBox _loopBars = new();
@@ -685,7 +698,7 @@ public sealed class MainForm : Form, IMessageFilter
 
         var instructions = new Label
         {
-            Text = "Use Alt+C Configuración, Alt+E Equipo, Alt+F Efectos, Alt+B Bancos, Alt+N NAM, Alt+H Herramientas, Alt+M Micrófono y videollamadas, Alt+O Dos guitarras, Alt+I MIDI y Alt+D Diagnóstico. F4 inicia o detiene. F1 muestra todos los atajos.",
+            Text = "Use Alt+C Configuración, Alt+E Equipo, Alt+F Efectos, Alt+B Bancos, Alt+N NAM, Alt+R Captura y entrenamiento NAM, Alt+H Herramientas, Alt+M Micrófono y videollamadas, Alt+O Dos guitarras, Alt+I MIDI y Alt+D Diagnóstico. F4 inicia o detiene. F1 muestra todos los atajos.",
             AutoSize = true,
             MaximumSize = new Size(820, 0),
             AccessibleName = string.Empty,
@@ -721,6 +734,8 @@ public sealed class MainForm : Form, IMessageFilter
             "MIDI: seleccionar controlador, aprender asignaciones y simular mensajes sin hardware");
         var diagnosticTab = CreateMainSection("10. Diagnóstico",
             "Diagnóstico accesible: estado ASIO, buffer real, carga DSP, callbacks, errores, NAM, videollamadas y memoria");
+        var namCaptureTab = CreateMainSection("11. Captura y entrenamiento NAM",
+            "Captura y entrenamiento NAM: capturar un amplificador real y entrenar el archivo punto NAM desde la misma sección");
 
         var generalContent = CreateTabContent();
         generalContent.Controls.Add(BuildAudioGroup());
@@ -771,7 +786,6 @@ public sealed class MainForm : Form, IMessageFilter
         var toolsContent = CreateTabContent();
         toolsContent.Controls.Add(BuildTunerGroup());
         toolsContent.Controls.Add(BuildMetronomeGroup());
-        toolsContent.Controls.Add(BuildNamCaptureGroup());
         toolsTab.Controls.Add(toolsContent);
 
         var microphoneContent = CreateTabContent();
@@ -790,7 +804,12 @@ public sealed class MainForm : Form, IMessageFilter
         diagnosticContent.Controls.Add(BuildAudioDiagnosticsGroup());
         diagnosticTab.Controls.Add(diagnosticContent);
 
-        _mainSections.AddRange(new Control[] { generalTab, equipmentTab, effectsTab, scenesTab, namTab, toolsTab, microphoneTab, dualGuitarTab, midiTab, diagnosticTab });
+        var namCaptureContent = CreateTabContent();
+        namCaptureContent.Controls.Add(BuildNamCaptureGroup());
+        namCaptureContent.Controls.Add(BuildNamTrainingGroup());
+        namCaptureTab.Controls.Add(namCaptureContent);
+
+        _mainSections.AddRange(new Control[] { generalTab, equipmentTab, effectsTab, scenesTab, namTab, toolsTab, microphoneTab, dualGuitarTab, midiTab, diagnosticTab, namCaptureTab });
         foreach (Control section in _mainSections)
         {
             section.Dock = DockStyle.Fill;
@@ -806,6 +825,7 @@ public sealed class MainForm : Form, IMessageFilter
         sectionMenu.Items.Add(CreateSectionMenuItem("E&fectos", Keys.Alt | Keys.F, 2, _effectSelector));
         sectionMenu.Items.Add(CreateSectionMenuItem("&Bancos", Keys.Alt | Keys.B, 3, _factoryPresetCombo));
         sectionMenu.Items.Add(CreateSectionMenuItem("&NAM", Keys.Alt | Keys.N, 4, _namEditGuitarCombo));
+        sectionMenu.Items.Add(CreateSectionMenuItem("Captu&ra y entrenamiento NAM", Keys.Alt | Keys.R, 10, _namCaptureSafetyConfirmed));
         sectionMenu.Items.Add(CreateSectionMenuItem("&Herramientas", Keys.Alt | Keys.H, 5, _tunerEnabled));
         sectionMenu.Items.Add(CreateSectionMenuItem("&Micrófono y videollamadas", Keys.Alt | Keys.M, 6, _voiceEnabled));
         sectionMenu.Items.Add(CreateSectionMenuItem("D&os guitarras", Keys.Alt | Keys.O, 7, _twoGuitarMode));
@@ -865,6 +885,7 @@ public sealed class MainForm : Form, IMessageFilter
             7 => "Dos guitarras",
             8 => "MIDI",
             9 => "Diagnóstico",
+            10 => "Captura y entrenamiento NAM",
             _ => "Sección"
         };
         SetStatus($"Sección {section}.");
@@ -2497,7 +2518,240 @@ public sealed class MainForm : Form, IMessageFilter
         return group;
     }
 
+    private Control BuildNamTrainingGroup()
+    {
+        var group = CreateGroup("Entrenar captura y crear archivo NAM");
+        var table = CreateTwoColumnTable();
+        group.Controls.Add(table);
+
+        var explanation = new Label
+        {
+            AutoSize = true,
+            MaximumSize = new Size(760, 0),
+            Text = "Paso 2. Seleccione una carpeta creada por Captura NAM. Amp Accessible usa input_original.wav como entrada estándar del entrenador oficial y output_capturado.wav como respuesta del amplificador. input_enviado.wav queda como registro de la atenuación de envío.",
+            AccessibleName = "Explicación del entrenamiento NAM integrado"
+        };
+        AddLabeledControl(table, "Proceso:", explanation);
+
+        _namTrainingCaptureFolder.ReadOnly = true;
+        _namTrainingCaptureFolder.Dock = DockStyle.Fill;
+        _namTrainingCaptureFolder.Text = "Ninguna carpeta de captura seleccionada.";
+        _namTrainingCaptureFolder.AccessibleName = "Carpeta de Captura NAM para entrenar";
+        AddLabeledControl(table, "Carpeta de captura:", _namTrainingCaptureFolder);
+
+        _namTrainingChooseFolderButton.Text = "Elegir &carpeta de captura";
+        _namTrainingChooseFolderButton.AccessibleName = "Elegir carpeta que contiene input original y output capturado";
+        AddLabeledControl(table, "Seleccionar:", _namTrainingChooseFolderButton);
+
+        _namTrainingModelName.Text = "Vintage_Clean";
+        _namTrainingModelName.Dock = DockStyle.Fill;
+        _namTrainingModelName.AccessibleName = "Nombre del modelo NAM a generar";
+        AddLabeledControl(table, "Nombre del modelo:", _namTrainingModelName);
+
+        ConfigureNumeric(_namTrainingEpochs, "Épocas de entrenamiento NAM");
+        AddLabeledControl(table, "Épocas, 10 a 300:", _namTrainingEpochs);
+
+        var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true };
+        _namTrainingCheckButton.Text = "&Comprobar entrenador";
+        _namTrainingInstallButton.Text = "&Instalar o actualizar entrenador NAM";
+        _namTrainingStartButton.Text = "&Entrenar y crear punto NAM";
+        _namTrainingCancelButton.Text = "&Cancelar entrenamiento";
+        _namTrainingCancelButton.Enabled = false;
+        _namTrainingLoadButton.Text = "Cargar último &NAM generado";
+        _namTrainingLoadButton.Enabled = false;
+        actions.Controls.AddRange(new Control[] { _namTrainingCheckButton, _namTrainingInstallButton, _namTrainingStartButton, _namTrainingCancelButton, _namTrainingLoadButton });
+        AddLabeledControl(table, "Acciones:", actions);
+
+        _namTrainingStatus.ReadOnly = true;
+        _namTrainingStatus.Multiline = true;
+        _namTrainingStatus.ScrollBars = ScrollBars.Vertical;
+        _namTrainingStatus.Height = 110;
+        _namTrainingStatus.Dock = DockStyle.Fill;
+        _namTrainingStatus.Text = NamTrainerService.IsInstalled
+            ? "Entrenador NAM detectado. Pulse Comprobar entrenador."
+            : "Entrenador NAM no instalado. Pulse Instalar o actualizar entrenador NAM.";
+        _namTrainingStatus.AccessibleName = "Estado del entrenador NAM";
+        AddLabeledControl(table, "Estado:", _namTrainingStatus);
+        return group;
+    }
+
+    private void ChooseNamTrainingFolder()
+    {
+        if (_namTrainingCancellation is not null) return;
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = "Elija una carpeta creada por Captura NAM que contenga input_original.wav y output_capturado.wav.",
+            ShowNewFolderButton = false,
+            SelectedPath = Directory.Exists(NamCaptureEngine.CaptureFolder)
+                ? NamCaptureEngine.CaptureFolder
+                : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath)) return;
+        AdoptNamTrainingFolder(dialog.SelectedPath, announce: true);
+    }
+
+    private void AdoptNamTrainingFolder(string folder, bool announce)
+    {
+        string input = Path.Combine(folder, "input_original.wav");
+        string output = Path.Combine(folder, "output_capturado.wav");
+        if (!File.Exists(input) || !File.Exists(output))
+        {
+            if (announce) SetStatus("La carpeta elegida no contiene input_original.wav y output_capturado.wav.", true);
+            return;
+        }
+        _namTrainingCaptureFolder.Text = folder;
+        string name = Path.GetFileName(folder);
+        if (!string.IsNullOrWhiteSpace(name)) _namTrainingModelName.Text = name;
+        if (announce) SetStatus($"Carpeta NAM preparada: {Path.GetFileName(folder)}.");
+    }
+
+    private async Task CheckNamTrainerAsync(bool announce)
+    {
+        try
+        {
+            NamTrainerInfo info = await _namTrainerService.CheckAsync();
+            string text = info.Installed
+                ? $"Entrenador NAM instalado. Versión {info.Version}. CUDA {(info.CudaAvailable ? "disponible" : "no detectada")}."
+                : "Entrenador NAM no instalado. Use Instalar o actualizar entrenador NAM.";
+            _namTrainingStatus.Text = text;
+            if (announce) SetStatus(text, !info.Installed);
+        }
+        catch (Exception ex)
+        {
+            _namTrainingStatus.Text = $"No se pudo comprobar el entrenador NAM: {ex.Message}";
+            if (announce) SetStatus(_namTrainingStatus.Text, true);
+        }
+    }
+
+    private async Task InstallNamTrainerAsync()
+    {
+        if (_namTrainingCancellation is not null) return;
+        if (_audioRequested || _engine.HasActiveSession || _namCaptureEngine.IsRunning)
+        {
+            SetStatus("Detenga primero el audio normal y cualquier Captura NAM.", true);
+            return;
+        }
+        _namTrainingCancellation = new CancellationTokenSource();
+        SetNamTrainingRunningState(true);
+        var progress = new Progress<string>(message => _namTrainingStatus.Text = message);
+        try
+        {
+            NamTrainerInfo info = await _namTrainerService.InstallOrUpdateAsync(progress, _namTrainingCancellation.Token);
+            _namTrainingStatus.Text = $"Entrenador NAM listo. Versión {info.Version}.";
+            SetStatus(_namTrainingStatus.Text);
+        }
+        catch (OperationCanceledException)
+        {
+            _namTrainingStatus.Text = "Instalación del entrenador NAM cancelada.";
+            SetStatus(_namTrainingStatus.Text);
+        }
+        catch (Exception ex)
+        {
+            _namTrainingStatus.Text = $"Error instalando entrenador NAM: {ex.Message}";
+            SetStatus(_namTrainingStatus.Text, true);
+        }
+        finally
+        {
+            _namTrainingCancellation?.Dispose();
+            _namTrainingCancellation = null;
+            SetNamTrainingRunningState(false);
+        }
+    }
+
+    private async Task RunNamTrainingAsync()
+    {
+        if (_namTrainingCancellation is not null) return;
+        if (_audioRequested || _engine.HasActiveSession)
+        {
+            SetStatus("Para entrenar NAM detenga primero el audio normal con F4.", true);
+            return;
+        }
+        if (!NamTrainerService.IsInstalled)
+        {
+            SetStatus("El entrenador NAM no está instalado.", true);
+            return;
+        }
+        string folder = _namTrainingCaptureFolder.Text;
+        if (!Directory.Exists(folder))
+        {
+            SetStatus("Seleccione primero una carpeta de captura NAM.", true);
+            return;
+        }
+
+        _namTrainingCancellation = new CancellationTokenSource();
+        SetNamTrainingRunningState(true);
+        var progress = new Progress<string>(message => _namTrainingStatus.Text = message);
+        try
+        {
+            string path = await _namTrainerService.TrainAsync(
+                folder, _namTrainingModelName.Text, (int)_namTrainingEpochs.Value,
+                progress, _namTrainingCancellation.Token);
+
+            _lastTrainedNamPath = path;
+            _namTrainingLoadButton.Enabled = true;
+            _namTrainingStatus.Text = $"Entrenamiento terminado. Modelo generado: {path}.";
+            ImportNamModel(path, announce: false, loadAfterImport: true);
+            SetStatus($"NAM generado, incorporado al Banco NAM y cargado: {Path.GetFileName(path)}.");
+        }
+        catch (OperationCanceledException)
+        {
+            _namTrainingStatus.Text = "Entrenamiento NAM cancelado.";
+            SetStatus(_namTrainingStatus.Text);
+        }
+        catch (Exception ex)
+        {
+            _namTrainingStatus.Text = $"Error de entrenamiento NAM: {ex.Message}";
+            SetStatus(_namTrainingStatus.Text, true);
+        }
+        finally
+        {
+            _namTrainingCancellation?.Dispose();
+            _namTrainingCancellation = null;
+            SetNamTrainingRunningState(false);
+        }
+    }
+
+    private void SetNamTrainingRunningState(bool running)
+    {
+        _namTrainingChooseFolderButton.Enabled = !running;
+        _namTrainingModelName.Enabled = !running;
+        _namTrainingEpochs.Enabled = !running;
+        _namTrainingCheckButton.Enabled = !running;
+        _namTrainingInstallButton.Enabled = !running;
+        _namTrainingStartButton.Enabled = !running;
+        _namTrainingCancelButton.Enabled = running;
+        if (!running) _namTrainingLoadButton.Enabled = !string.IsNullOrWhiteSpace(_lastTrainedNamPath) && File.Exists(_lastTrainedNamPath);
+    }
+
+    private void LoadLastTrainedNam()
+    {
+        if (string.IsNullOrWhiteSpace(_lastTrainedNamPath) || !File.Exists(_lastTrainedNamPath))
+        {
+            SetStatus("Todavía no hay un NAM generado en esta sesión.", true);
+            return;
+        }
+        ImportNamModel(_lastTrainedNamPath, announce: true, loadAfterImport: true);
+    }
+
+    private void NavigateFactoryPresetWithArrow(int direction)
+    {
+        if (_factoryPresetCombo.Items.Count == 0) return;
+        int index = _factoryPresetCombo.SelectedIndex;
+        if (index < 0) index = 0;
+        int next = Math.Clamp(index + direction, 0, _factoryPresetCombo.Items.Count - 1);
+        if (next == index)
+        {
+            SetStatus(direction < 0 ? "Primer banco de fábrica." : "Último banco de fábrica.");
+            return;
+        }
+        _loadingFactoryPreset = true;
+        try { _factoryPresetCombo.SelectedIndex = next; }
+        finally { _loadingFactoryPreset = false; }
+        LoadSelectedFactoryPreset(announce: true);
+        _factoryPresetCombo.Focus();
+    }
     private Control BuildNamCaptureGroup()
+
     {
         var group = CreateGroup("Captura NAM de amplificador real");
         var table = CreateTwoColumnTable();
@@ -2644,6 +2898,8 @@ public sealed class MainForm : Form, IMessageFilter
                 ? $"Prueba de nivel terminada. Pico {result.PeakDbfs:0.0} dBFS. {assessment}"
                 : $"Captura NAM terminada. Duración {result.Seconds:0.0} segundos. Pico {result.PeakDbfs:0.0} dBFS. {assessment} Archivos guardados en {result.Folder}.";
             _namCaptureStatus.Text = message;
+            if (!levelTest && !string.IsNullOrWhiteSpace(result.Folder))
+                AdoptNamTrainingFolder(result.Folder, announce: false);
             SetStatus(message, result.ClippedSamples > 0);
         }
         catch (OperationCanceledException)
@@ -4109,6 +4365,12 @@ public sealed class MainForm : Form, IMessageFilter
         _namCaptureStartButton.Click += async (_, _) => await RunNamCaptureAsync(levelTest: false);
         _namCaptureStopButton.Click += (_, _) => StopNamCapture();
         _namCaptureOpenFolderButton.Click += (_, _) => OpenNamCaptureFolder();
+        _namTrainingChooseFolderButton.Click += (_, _) => ChooseNamTrainingFolder();
+        _namTrainingCheckButton.Click += async (_, _) => await CheckNamTrainerAsync(announce: true);
+        _namTrainingInstallButton.Click += async (_, _) => await InstallNamTrainerAsync();
+        _namTrainingStartButton.Click += async (_, _) => await RunNamTrainingAsync();
+        _namTrainingCancelButton.Click += (_, _) => _namTrainingCancellation?.Cancel();
+        _namTrainingLoadButton.Click += (_, _) => LoadLastTrainedNam();
         _loopRecordButton.Click += (_, _) => ToggleLoopFirstPass();
         _loopOverdubButton.Click += (_, _) => ToggleLoopOverdub();
         _loopUndoButton.Click += (_, _) => UndoLastLoopOverdub();
@@ -4289,6 +4551,7 @@ public sealed class MainForm : Form, IMessageFilter
             try
             {
                 _namCaptureCancellation?.Cancel();
+                _namTrainingCancellation?.Cancel();
                 _namCaptureEngine.Dispose();
             }
             catch { }
@@ -8250,6 +8513,7 @@ public sealed class MainForm : Form, IMessageFilter
             ? CurrentLoopCaptureSourceName
             : "rig principal / Guitarra 2; selector dual en espera";
         text.AppendLine($"Looper por guitarra 2.41.31: fuente de captura = {loopSourceDiagnostic}; la selección se aplica a primera vuelta y overdub; acompañamiento global no se imprime; durante una captura activa la fuente queda bloqueada para evitar cambios a mitad de vuelta.");
+        text.AppendLine($"Entrenador NAM integrado 2.41.87: {(NamTrainerService.IsInstalled ? "instalado" : "no instalado")}; entrenamiento {(_namTrainingCancellation is null ? "detenido" : "en curso")}; último NAM generado {(string.IsNullOrWhiteSpace(_lastTrainedNamPath) ? "ninguno" : Path.GetFileName(_lastTrainedNamPath))}.");
         text.AppendLine($"Memoria: administrada {managedMb} MB; proceso {processMb} MB; GC 0/1/2: {GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)}");
         string looperDiagnosticState = _engine.IsLoopRecording
             ? $"grabando primera vuelta desde {CurrentLoopCaptureSourceName}"
@@ -11454,6 +11718,20 @@ public sealed class MainForm : Form, IMessageFilter
             return true;
         }
 
+        if (modifiers == Keys.None && _factoryPresetCombo.Focused)
+        {
+            if (keyCode is Keys.Up or Keys.Left)
+            {
+                NavigateFactoryPresetWithArrow(-1);
+                return true;
+            }
+            if (keyCode is Keys.Down or Keys.Right)
+            {
+                NavigateFactoryPresetWithArrow(1);
+                return true;
+            }
+        }
+
         // Las teclas de función principales también se capturan aquí para que
         // funcionen de forma global aunque el foco esté en un ComboBox, lista,
         // cuadro de texto o cualquier control de la sección NAM.
@@ -12082,6 +12360,7 @@ public sealed class MainForm : Form, IMessageFilter
                 Keys.F => 2,
                 Keys.B => 3,
                 Keys.N => 4,
+                Keys.R => 10,
                 Keys.H => 5,
                 Keys.M => 6,
                 Keys.O => 7,
@@ -12104,6 +12383,7 @@ public sealed class MainForm : Form, IMessageFilter
                     7 => _twoGuitarMode,
                     8 => _midiInputCombo,
                     9 => _audioDiagnosticReport,
+                    10 => _namCaptureSafetyConfirmed,
                     _ => _driverCombo
                 };
                 ShowSection(section, focus);

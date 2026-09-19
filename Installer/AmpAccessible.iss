@@ -1,5 +1,5 @@
 #define MyAppName "Amp Accessible"
-#define MyAppVersion "2.41.86"
+#define MyAppVersion "2.41.87"
 #define MyAppPublisher "GDM"
 #define MyAppExeName "AmpAccessible.exe"
 
@@ -71,10 +71,10 @@ procedure InitializeWizard();
 begin
   MaintenancePage := CreateInputOptionPage(wpWelcome,
     'Mantenimiento de Amp Accessible',
-    'Amp Accessible ya está instalado.',
-    'Puede reparar o actualizar la instalación con este mismo instalador, o abrir el desinstalador. Sus NAM, presets, escenas y copias de seguridad no se borran.',
+    'Amp Accessible ya estÃ¡ instalado.',
+    'Puede reparar o actualizar la instalaciÃ³n con este mismo instalador, o abrir el desinstalador. Sus NAM, presets, escenas y copias de seguridad no se borran.',
     True, False);
-  MaintenancePage.Add('Reparar o actualizar instalación');
+  MaintenancePage.Add('Reparar o actualizar instalaciÃ³n');
   MaintenancePage.Add('Desinstalar Amp Accessible');
   MaintenancePage.SelectedValueIndex := 0;
 end;
@@ -94,7 +94,7 @@ begin
     if FileExists(InstalledUninstaller()) then
       Exec(InstalledUninstaller(), '', '', SW_SHOWNORMAL, ewNoWait, ResultCode)
     else
-      MsgBox('No se encontró el desinstalador de la instalación actual.', mbError, MB_OK);
+      MsgBox('No se encontrÃ³ el desinstalador de la instalaciÃ³n actual.', mbError, MB_OK);
     Result := False;
     WizardForm.Close;
   end;
