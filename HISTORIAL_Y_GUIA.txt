@@ -1,3 +1,11 @@
+Amp Accessible 2.41.92 - Prueba Calibracion NAM V3 13s JAWS
+Base estable: 2.41.91 (39e86e84).
+- La prueba previa pasa de 5 a 13 segundos para incluir los pulsos V3 de 10,5 y 11,5 segundos.
+- Exige 0 dB digital, mide ruido RMS, ruido pico, ambos pulsos y clipping.
+- Replica el umbral oficial NAM: maximo entre ruido pico mas 0,0003 y 1,001 veces el ruido pico.
+- Promedia ambos pulsos y busca el primer cruce, igual que NAM.
+- JAWS anuncia CALIBRACION NAM APROBADA y latencia preliminar, o explica por que no sirve antes de grabar tres minutos.
+- No modifica el entrenador ni baja mas sus umbrales.
 Amp Accessible 2.41.91 - Umbral NAM Robusto V3 JAWS
 Base estable: 2.41.90 (85851037).
 - Corrige el umbral demasiado exigente de la medicion accesible V3 de 2.41.90.

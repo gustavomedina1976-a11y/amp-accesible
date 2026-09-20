@@ -26,7 +26,15 @@ internal sealed record NamCaptureResult(
     double PeakDbfs,
     long ClippedSamples,
     long FramesCaptured,
-    int BufferSize);
+    int BufferSize,
+    bool CalibrationReady,
+    int? CalibrationLatencySamples,
+    string? CalibrationSummary);
+
+internal sealed record NamCalibrationCheck(
+    bool Ready,
+    int? LatencySamples,
+    string Summary);
 
 /// <summary>
 /// Ruta independiente para capturar un amplificador real con NAM.
@@ -65,15 +73,17 @@ internal sealed class NamCaptureEngine : IDisposable
 
         float[] original = LoadTrainingInput(request.TrainingInputPath);
         int targetFrames = request.LevelTest
-            ? Math.Min(original.Length, SampleRate * 5)
+            ? Math.Min(original.Length, SampleRate * 13)
             : original.Length;
         if (targetFrames < SampleRate)
             throw new InvalidOperationException("El archivo de entrenamiento es demasiado corto.");
 
         float attenuationDb = Math.Clamp(float.IsFinite(request.SendAttenuationDb) ? request.SendAttenuationDb : -30f, -60f, 0f);
-        if (!request.LevelTest && MathF.Abs(attenuationDb) > 0.01f)
+        if (MathF.Abs(attenuationDb) > 0.01f)
             throw new InvalidOperationException(
-                "La captura completa NAM exige 0 dB de atenuación digital. Use la atenuación solamente para pruebas de nivel y ajuste el nivel final con el control físico Output o una caja de reamp.");
+                request.LevelTest
+                    ? "La prueba de calibración NAM exige 0 dB de atenuación digital para medir exactamente los pulsos V3. Baje primero el Output físico, seleccione 0 dB y vuelva a probar."
+                    : "La captura completa NAM exige 0 dB de atenuación digital. Ajuste el nivel final con el control físico Output o una caja de reamp.");
         float sendGain = MathF.Pow(10f, attenuationDb / 20f);
         float[] sent = new float[targetFrames];
         for (int i = 0; i < sent.Length; i++)
@@ -155,8 +165,10 @@ internal sealed class NamCaptureEngine : IDisposable
 
         if (request.LevelTest)
         {
+            NamCalibrationCheck calibration = AnalyzeV3Calibration(recorded, captured, clipped);
             return new NamCaptureResult(true, null, null, null, null, null,
-                seconds, peak, peakDbfs, clipped, captured, bufferSize);
+                seconds, peak, peakDbfs, clipped, captured, bufferSize,
+                calibration.Ready, calibration.LatencySamples, calibration.Summary);
         }
 
         Directory.CreateDirectory(CaptureFolder);
@@ -209,7 +221,77 @@ internal sealed class NamCaptureEngine : IDisposable
         File.WriteAllText(reportPath, report.ToString(), Encoding.UTF8);
 
         return new NamCaptureResult(false, folder, originalPath, sentPath, outputPath, reportPath,
-            seconds, peak, peakDbfs, clipped, captured, bufferSize);
+            seconds, peak, peakDbfs, clipped, captured, bufferSize,
+            false, null, null);
+    }
+
+    private static NamCalibrationCheck AnalyzeV3Calibration(float[] recorded, int captured, long clipped)
+    {
+        const int noiseStart = 492000;
+        const int noiseEnd = 498000;
+        const int lookahead = 1000;
+        const int lookback = 10000;
+        int[] blips = { 504000, 552000 };
+        int scanLength = lookahead + lookback;
+        int required = blips[1] + lookback;
+
+        if (captured < required)
+            return new NamCalibrationCheck(false, null,
+                $"Prueba incompleta: se capturaron {captured} muestras y se necesitan al menos {required} para incluir los dos pulsos V3.");
+
+        double noiseSquares = 0.0;
+        float backgroundPeak = 0f;
+        for (int i = noiseStart; i < noiseEnd; i++)
+        {
+            float absolute = MathF.Abs(recorded[i]);
+            if (absolute > backgroundPeak) backgroundPeak = absolute;
+            noiseSquares += recorded[i] * recorded[i];
+        }
+        double noiseRms = Math.Sqrt(noiseSquares / (noiseEnd - noiseStart));
+        float triggerThreshold = Math.Max(backgroundPeak + 0.0003f, 1.001f * backgroundPeak);
+
+        double[] average = new double[scanLength];
+        float[] pulsePeaks = new float[2];
+        for (int p = 0; p < blips.Length; p++)
+        {
+            int start = blips[p] - lookahead;
+            float pulsePeak = 0f;
+            for (int j = 0; j < scanLength; j++)
+            {
+                float sample = recorded[start + j];
+                average[j] += sample / 2.0;
+                float absolute = MathF.Abs(sample);
+                if (absolute > pulsePeak) pulsePeak = absolute;
+            }
+            pulsePeaks[p] = pulsePeak;
+        }
+
+        static double Db(double v) => v > 1.0e-12 ? 20.0 * Math.Log10(v) : -120.0;
+        double noiseDb = Db(noiseRms);
+        double backgroundDb = Db(backgroundPeak);
+        double p1Db = Db(pulsePeaks[0]);
+        double p2Db = Db(pulsePeaks[1]);
+        double thresholdDb = Db(triggerThreshold);
+        double snrDb = Db(Math.Min(pulsePeaks[0], pulsePeaks[1])) - noiseDb;
+
+        if (clipped > 0)
+            return new NamCalibrationCheck(false, null,
+                $"Calibración NAM NO aprobada: hay clipping en {clipped} muestras. Pulsos {p1Db:0.0} y {p2Db:0.0} dBFS; ruido RMS {noiseDb:0.0} dBFS. Baje la ganancia de retorno.");
+
+        int first = -1;
+        for (int j = 0; j < average.Length; j++)
+        {
+            if (Math.Abs(average[j]) > triggerThreshold) { first = j; break; }
+        }
+
+        if (first < 0)
+            return new NamCalibrationCheck(false, null,
+                $"Calibración NAM NO aprobada. El criterio oficial no detecta los dos pulsos V3. Pulsos {p1Db:0.0} y {p2Db:0.0} dBFS; ruido RMS {noiseDb:0.0} dBFS; ruido pico {backgroundDb:0.0} dBFS; umbral oficial {thresholdDb:0.0} dBFS; relación aproximada {snrDb:0.0} dB. Suba el envío físico hacia el amplificador y baje proporcionalmente la ganancia de retorno, sin producir clipping, y repita solo esta prueba de 13 segundos.");
+
+        int delay = first - lookahead;
+        int latency = delay - 1;
+        return new NamCalibrationCheck(true, latency,
+            $"Calibración NAM APROBADA. El criterio oficial detecta los pulsos V3. Latencia preliminar {latency} muestras; pulsos {p1Db:0.0} y {p2Db:0.0} dBFS; ruido RMS {noiseDb:0.0} dBFS; umbral oficial {thresholdDb:0.0} dBFS; relación aproximada {snrDb:0.0} dB. Puede iniciar la captura completa sin cambiar ningún control físico.");
     }
 
     public void RequestStop()
