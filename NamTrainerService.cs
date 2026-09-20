@@ -404,69 +404,85 @@ def estimate_v3_latency_accessible(output_path):
     lookahead = 1000
     lookback = 10000
 
-    noise = np.abs(np.asarray(y[noise_start:noise_end], dtype=np.float64))
-    background_peak = float(np.max(noise)) if len(noise) else 0.0
+    noise = np.asarray(y[noise_start:noise_end], dtype=np.float64)
     background_rms = float(np.sqrt(np.mean(np.square(noise)))) if len(noise) else 0.0
     global_peak = float(np.max(np.abs(y))) if len(y) else 0.0
-    margin = max(1.0e-5, background_peak * 0.05)
-    threshold = max(background_peak + margin, background_rms * 6.0)
 
-    delays = []
-    pulse_peaks = []
     scans = []
-
+    pulse_peaks = []
     for position in expected:
         start = max(0, position - lookahead)
         stop = min(len(y), position + lookback)
         signed = np.asarray(y[start:stop], dtype=np.float64)
-        window = np.abs(signed)
+        if len(signed) != lookahead + lookback:
+            user_fail("No se pudo analizar completa una de las ventanas de pulsos V3.")
         scans.append(signed)
-        if len(window) == 0:
-            user_fail("No se pudo analizar la ventana de pulsos de calibración NAM.")
-
-        pulse_peak = float(np.max(window))
-        pulse_peaks.append(pulse_peak)
-        triggered = np.where(window > threshold)[0]
-        if len(triggered) == 0:
-            user_fail(
-                "No se detectó el frente de uno de los pulsos V3 por encima del ruido. "
-                f"Umbral {dbfs(threshold):.1f} dBFS; pico del pulso {dbfs(pulse_peak):.1f} dBFS; "
-                f"ruido RMS {dbfs(background_rms):.1f} dBFS. "
-                "Repita la captura completa con atenuación digital 0 dB y ajuste el nivel con Output físico o caja de reamp."
-            )
-        first = int(triggered[0])
-        delays.append(first - lookahead)
-
-    spread = max(delays) - min(delays)
-    weakest_peak = min(pulse_peaks)
-    snr_ratio = weakest_peak / max(background_rms, 1.0e-12)
-    snr_db = 20.0 * np.log10(max(snr_ratio, 1.0e-12))
+        pulse_peaks.append(float(np.max(np.abs(signed))))
 
     if global_peak >= 0.999:
         user_fail("La captura presenta clipping. Repita la captura bajando la ganancia de retorno.")
 
-    if spread > 20:
-        average_scan = np.mean(np.stack(scans), axis=0)
-        average_triggered = np.where(np.abs(average_scan) > threshold)[0]
-        average_delay = None if len(average_triggered) == 0 else int(average_triggered[0]) - lookahead
-        extra = "" if average_delay is None else f"; promedio detectado {average_delay} muestras"
+    # Promediar ambos pulsos reduce ruido no correlacionado, siguiendo la idea del detector oficial.
+    average_scan = np.mean(np.stack(scans), axis=0)
+    detect_threshold = max(0.0003, background_rms * 3.0)
+    confirm_threshold = max(0.0003, background_rms * 2.5)
+
+    triggered = np.where(np.abs(average_scan) > detect_threshold)[0]
+    weakest_peak = min(pulse_peaks)
+    snr_ratio = weakest_peak / max(background_rms, 1.0e-12)
+    snr_db = 20.0 * np.log10(max(snr_ratio, 1.0e-12))
+
+    if len(triggered) == 0:
         user_fail(
-            "Los primeros frentes de los dos pulsos V3 no coinciden con suficiente precisión. "
-            f"Se midieron {delays[0]} y {delays[1]} muestras; diferencia {spread} muestras{extra}. "
-            "No se forzará una latencia. Repita la captura completa con 0 dB digital y sin modificar controles durante la toma."
+            "La captura tiene señal, pero el promedio de los dos pulsos V3 no supera un umbral robusto. "
+            f"Umbral {dbfs(detect_threshold):.1f} dBFS; pulso más débil {dbfs(weakest_peak):.1f} dBFS; "
+            f"ruido RMS {dbfs(background_rms):.1f} dBFS; relación {snr_db:.1f} dB. "
+            "No se forzará una latencia."
         )
 
+    common_index = None
+    confirmed_indices = None
+
+    for candidate in triggered:
+        lo = max(0, int(candidate) - 20)
+        hi = min(len(average_scan), int(candidate) + 21)
+        local = []
+        valid = True
+
+        for scan in scans:
+            hits = np.where(np.abs(scan[lo:hi]) > confirm_threshold)[0]
+            if len(hits) == 0:
+                valid = False
+                break
+            local.append(lo + int(hits[0]))
+
+        if valid and max(local) - min(local) <= 20:
+            common_index = int(candidate)
+            confirmed_indices = local
+            break
+
+    if common_index is None or confirmed_indices is None:
+        user_fail(
+            "Se detectó energía de los pulsos V3, pero no se pudo confirmar el mismo frente "
+            "en ambos pulsos dentro de 20 muestras. "
+            f"Pulso más débil {dbfs(weakest_peak):.1f} dBFS; ruido RMS {dbfs(background_rms):.1f} dBFS; "
+            f"relación {snr_db:.1f} dB. No se forzará una latencia."
+        )
+
+    delays = [index - lookahead for index in confirmed_indices]
+    spread = max(delays) - min(delays)
+    common_delay = common_index - lookahead
+    latency = common_delay - 1
+
     print(
-        "GDM_STATUS=Calibración accesible V3 por primer frente: "
-        f"latencias {delays[0]} y {delays[1]} muestras; diferencia {spread}; "
-        f"umbral {dbfs(threshold):.1f} dBFS; ruido RMS {dbfs(background_rms):.1f} dBFS; "
-        f"relación {snr_db:.1f} dB.",
+        "GDM_STATUS=Calibración accesible V3 robusta: "
+        f"promedio {common_delay} muestras; confirmaciones {delays[0]} y {delays[1]}; "
+        f"diferencia {spread}; umbral {dbfs(detect_threshold):.1f} dBFS; "
+        f"ruido RMS {dbfs(background_rms):.1f} dBFS; relación {snr_db:.1f} dB.",
         flush=True,
     )
 
-    latency = int(round(sum(delays) / len(delays))) - 1
     return latency
-
 Path(destination).mkdir(parents=True, exist_ok=True)
 print("GDM_STATUS=Validando entrada y salida", flush=True)
 

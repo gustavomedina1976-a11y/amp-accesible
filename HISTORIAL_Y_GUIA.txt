@@ -1,3 +1,14 @@
+Amp Accessible 2.41.91 - Umbral NAM Robusto V3 JAWS
+Base estable: 2.41.90 (85851037).
+- Corrige el umbral demasiado exigente de la medicion accesible V3 de 2.41.90.
+- La captura actual con pulso -12,3 dBFS y ruido RMS -26,4 dBFS tiene aproximadamente 14,1 dB de separacion y no debe descartarse por el antiguo umbral 6 x RMS.
+- El fallback promedia los dos pulsos V3 para reducir ruido no correlacionado.
+- El umbral de deteccion pasa a 3 x RMS, con minimo absoluto 0,0003, igual al minimo absoluto usado por NAM oficial.
+- Antes de aceptar latencia confirma por separado ambos pulsos con 2,5 x RMS y tolerancia maxima de 20 muestras.
+- Si no hay confirmacion doble, no fuerza latencia.
+- No requiere repetir la captura Clean antes de volver a probar el entrenamiento.
+- Captura completa sigue exigiendo 0 dB digital y Figure 1 permanece suprimida.
+- No cambia DSP, amplificadores, NAM de reproduccion, IR, efectos, presets, escenas, perfiles, Loopback ni acompanamiento.
 Amp Accessible 2.41.90 - Captura NAM Estandar Latencia Frente JAWS
 Base estable: 2.41.89 (48cd5852).
 - La captura completa exige 0 dB de atenuacion digital para conservar exactamente el input oficial NAM.
