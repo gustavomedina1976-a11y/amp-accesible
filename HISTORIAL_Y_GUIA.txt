@@ -1,3 +1,14 @@
+Amp Accessible 2.41.89 - Latencia NAM Accesible Sin Figure JAWS
+Base estable: 2.41.88 (4d3f5e20).
+- Corrige el bloqueo del entrenamiento en la ventana externa Figure 1 de Matplotlib.
+- Primero usa la deteccion oficial de latencia de Neural Amp Modeler con graficos suprimidos.
+- Si el input es V3 y NAM no detecta los pulsos, aplica una segunda medicion accesible sobre los dos pulsos de calibracion.
+- La medicion alternativa solo se acepta si ambas respuestas producen latencias consistentes y una relacion señal ruido suficiente.
+- Si la captura no es confiable, aborta antes de entrenar y JAWS informa pulsos, ruido, pico global y accion recomendada.
+- No se fuerza una latencia inventada.
+- Si la latencia queda validada, se entrega a NAM como latencia manual y el entrenamiento continua sin Figure 1.
+- Los errores esperables de captura se muestran resumidos, sin traceback de Python.
+- No cambia DSP, amplificadores, NAM de reproduccion, IR, efectos, presets, escenas, perfiles, Loopback ni acompanamiento.
 Amp Accessible 2.41.88 - Entrenador NAM Descarga Robusta JAWS
 Base estable: 2.41.87 (1f4464e8).
 - Corrige HTTP 403 al instalar el entrenador NAM.

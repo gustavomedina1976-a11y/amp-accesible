@@ -135,7 +135,15 @@ internal sealed class NamTrainerService
             cancellationToken).ConfigureAwait(false);
 
         if (result.ExitCode != 0)
+        {
+            string[] lines = result.Output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            string userErrorMarker = lines.LastOrDefault(line =>
+                line.StartsWith("GDM_USER_ERROR=", StringComparison.Ordinal)) ?? string.Empty;
+            if (userErrorMarker.Length > "GDM_USER_ERROR=".Length)
+                throw new InvalidOperationException(userErrorMarker["GDM_USER_ERROR=".Length..].Trim());
+
             throw new InvalidOperationException("El entrenador NAM terminó con error. " + result.Output);
+        }
 
         string marker = result.Output
             .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
@@ -363,6 +371,7 @@ internal sealed class NamTrainerService
     private const string PythonScript = """
 import sys
 from pathlib import Path
+import numpy as np
 from nam.train import core
 from nam.models.metadata import UserMetadata
 
@@ -372,15 +381,137 @@ destination = sys.argv[3]
 model_name = sys.argv[4]
 epochs = int(sys.argv[5])
 
+def dbfs(value):
+    value = float(abs(value))
+    if value <= 1.0e-12:
+        return -120.0
+    return 20.0 * np.log10(value)
+
+def user_fail(message):
+    print("GDM_USER_ERROR=" + message, flush=True)
+    raise RuntimeError(message)
+
+def estimate_v3_latency_accessible(output_path):
+    y = core._wav_to_np(output_path)
+    if len(y) < 562000:
+        user_fail(
+            "La captura NAM es demasiado corta para medir los pulsos de calibración V3. "
+            "Repita la captura completa."
+        )
+
+    expected = (504000, 552000)
+    noise_start, noise_end = 492000, 498000
+    lookahead = 1000
+    lookback = 10000
+
+    noise = np.asarray(y[noise_start:noise_end], dtype=np.float64)
+    background_rms = float(np.sqrt(np.mean(np.square(noise)))) if len(noise) else 0.0
+    global_peak = float(np.max(np.abs(y))) if len(y) else 0.0
+
+    delays = []
+    amplitudes = []
+
+    for position in expected:
+        start = max(0, position - lookahead)
+        stop = min(len(y), position + lookback)
+        window = np.abs(np.asarray(y[start:stop], dtype=np.float64))
+        if len(window) == 0:
+            user_fail("No se pudo analizar la ventana de pulsos de calibración NAM.")
+
+        index = int(np.argmax(window))
+        amplitudes.append(float(window[index]))
+        delays.append((start + index) - position)
+
+    spread = max(delays) - min(delays)
+    pulse_peak = min(amplitudes)
+    snr_ratio = pulse_peak / max(background_rms, 1.0e-12)
+    snr_db = 20.0 * np.log10(max(snr_ratio, 1.0e-12))
+
+    print(
+        "GDM_STATUS=Calibración accesible V3: "
+        f"pulsos {dbfs(pulse_peak):.1f} dBFS; "
+        f"ruido RMS {dbfs(background_rms):.1f} dBFS; "
+        f"relación {snr_db:.1f} dB; "
+        f"delays {delays[0]} y {delays[1]} muestras.",
+        flush=True,
+    )
+
+    if global_peak >= 0.999:
+        user_fail(
+            "La captura presenta clipping. Repita la captura bajando la ganancia de retorno."
+        )
+
+    if spread > 20:
+        user_fail(
+            "Los dos pulsos de calibración no dan una latencia consistente. "
+            f"Se midieron {delays[0]} y {delays[1]} muestras. "
+            "Revise la conexión de retorno, desactive gate, delay, chorus y reverb del amplificador "
+            "o de la cadena de captura, y repita la captura."
+        )
+
+    if pulse_peak < 1.0e-5 or snr_ratio < 6.0:
+        user_fail(
+            "La respuesta a los pulsos de calibración es demasiado débil para entrenar con seguridad. "
+            f"Pulsos {dbfs(pulse_peak):.1f} dBFS; ruido {dbfs(background_rms):.1f} dBFS; "
+            f"relación señal ruido {snr_db:.1f} dB; pico global {dbfs(global_peak):.1f} dBFS. "
+            "Repita la captura aumentando gradualmente el nivel de envío o la ganancia de retorno, "
+            "sin llegar a clipping."
+        )
+
+    latency = int(round(sum(delays) / len(delays))) - 1
+    return latency
+
 Path(destination).mkdir(parents=True, exist_ok=True)
-print("GDM_STATUS=Validando entrada y salida")
+print("GDM_STATUS=Validando entrada y salida", flush=True)
+
+input_version, strong_match = core._detect_input_version(input_path)
+
+latency_analysis = core._analyze_latency(
+    None,
+    input_version,
+    input_path,
+    output_path,
+    silent=True,
+    _override_suppress_plots=True,
+)
+
+latency = latency_analysis.calibration.recommended
+
+if latency is not None:
+    print(
+        f"GDM_STATUS=Latencia NAM detectada por el método oficial: {latency} muestras.",
+        flush=True,
+    )
+elif input_version.major == 3:
+    print(
+        "GDM_STATUS=El método oficial no detectó los pulsos. "
+        "Probando medición accesible V3.",
+        flush=True,
+    )
+    latency = estimate_v3_latency_accessible(output_path)
+    print(
+        f"GDM_STATUS=Latencia accesible validada: {latency} muestras. "
+        "No se abrirán gráficos externos.",
+        flush=True,
+    )
+else:
+    user_fail(
+        "NAM no pudo detectar automáticamente la latencia y esta versión de input "
+        "todavía no tiene medición accesible alternativa. Repita la captura con mayor nivel de retorno."
+    )
+
+print(
+    f"GDM_STATUS=Entrenamiento NAM iniciado: {model_name}. "
+    f"Épocas: {epochs}. Latencia: {latency} muestras.",
+    flush=True,
+)
 
 result = core.train(
     input_path,
     output_path,
     destination,
     epochs=epochs,
-    latency=None,
+    latency=latency,
     silent=True,
     save_plot=False,
     modelname=model_name,
@@ -389,9 +520,12 @@ result = core.train(
 )
 
 if result is None or result.model is None:
-    raise RuntimeError("NAM no produjo un modelo. Revise las validaciones de la captura.")
+    user_fail(
+        "NAM rechazó la captura durante sus controles de calidad. "
+        "Revise nivel, ruido y que no haya gate, chorus, delay o reverb en la cadena capturada."
+    )
 
-print("GDM_STATUS=Exportando modelo NAM")
+print("GDM_STATUS=Exportando modelo NAM", flush=True)
 user_metadata = UserMetadata()
 result.model.net.export(
     destination,
@@ -400,10 +534,15 @@ result.model.net.export(
     other_metadata={"training": result.metadata.model_dump()},
 )
 
-files = sorted(Path(destination).rglob("*.nam"), key=lambda p: p.stat().st_mtime, reverse=True)
-if not files:
-    raise RuntimeError("El entrenamiento finalizó pero no apareció un archivo .nam.")
+files = sorted(
+    Path(destination).rglob("*.nam"),
+    key=lambda p: p.stat().st_mtime,
+    reverse=True,
+)
 
-print("GDM_NAM_RESULT=" + str(files[0]))
+if not files:
+    user_fail("El entrenamiento finalizó pero no apareció un archivo punto NAM.")
+
+print("GDM_NAM_RESULT=" + str(files[0]), flush=True)
 """;
 }
