@@ -2796,8 +2796,8 @@ public sealed class MainForm : Form, IMessageFilter
         AddLabeledControl(table, "&Entrada de retorno:", _namCaptureReturnInputCombo);
 
         ConfigureNumeric(_namCaptureSendDb, "Atenuación digital de envío NAM en decibelios");
-        _namCaptureSendDb.AccessibleDescription = "Rango menos 60 a 0 dB. Empieza en menos 30 dB por seguridad. Además, comience con el control físico Output de la Focusrite completamente abajo y súbalo lentamente.";
-        AddLabeledControl(table, "&Atenuación de envío, menos 60 a 0 dB:", _namCaptureSendDb);
+        _namCaptureSendDb.AccessibleDescription = "Rango menos 60 a 0 dB para pruebas de nivel. Empieza en menos 30 dB por seguridad. La captura completa NAM exige 0 dB digital para conservar exactamente el input oficial. Ajuste el nivel real con Output físico o caja de reamp y haga una prueba de nivel a 0 dB antes de capturar.";
+        AddLabeledControl(table, "&Atenuación de envío para prueba, menos 60 a 0 dB; captura completa exige 0 dB:", _namCaptureSendDb);
 
         var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
         _namCaptureTestButton.Text = "Comprobar &nivel, 5 segundos";
@@ -2876,6 +2876,14 @@ public sealed class MainForm : Form, IMessageFilter
         if (string.IsNullOrWhiteSpace(driver)) { SetStatus("Seleccione primero el controlador ASIO.", true); return; }
         if (!File.Exists(_namCaptureInputPath.Text)) { SetStatus("Seleccione primero input.wav de entrenamiento NAM.", true); _namCaptureBrowseButton.Focus(); return; }
         if (_namCaptureOutputCombo.SelectedIndex < 0 || _namCaptureReturnInputCombo.SelectedIndex < 0) { SetStatus("Seleccione salida de envío y entrada de retorno para Captura NAM.", true); return; }
+        if (!levelTest && _namCaptureSendDb.Value != 0m)
+        {
+            string warning = "La captura completa NAM requiere atenuación digital en 0 dB para conservar exactamente el input oficial. Baje primero el Output físico o la caja de reamp, ponga Atenuación de envío en 0 dB y haga Comprobar nivel antes de iniciar la captura completa.";
+            _namCaptureStatus.Text = warning;
+            SetStatus(warning, true);
+            _namCaptureSendDb.Focus();
+            return;
+        }
 
         _namCaptureCancellation?.Dispose();
         _namCaptureCancellation = new CancellationTokenSource();
@@ -8513,7 +8521,7 @@ public sealed class MainForm : Form, IMessageFilter
             ? CurrentLoopCaptureSourceName
             : "rig principal / Guitarra 2; selector dual en espera";
         text.AppendLine($"Looper por guitarra 2.41.31: fuente de captura = {loopSourceDiagnostic}; la selección se aplica a primera vuelta y overdub; acompañamiento global no se imprime; durante una captura activa la fuente queda bloqueada para evitar cambios a mitad de vuelta.");
-        text.AppendLine($"Entrenador NAM integrado 2.41.89: {(NamTrainerService.IsInstalled ? "instalado" : "no instalado")}; latencia accesible V3 y gráficos externos suprimidos; entrenamiento {(_namTrainingCancellation is null ? "detenido" : "en curso")}; último NAM generado {(string.IsNullOrWhiteSpace(_lastTrainedNamPath) ? "ninguno" : Path.GetFileName(_lastTrainedNamPath))}.");
+        text.AppendLine($"Entrenador NAM integrado 2.41.90: {(NamTrainerService.IsInstalled ? "instalado" : "no instalado")}; captura completa exige 0 dB digital; latencia V3 por primer frente y gráficos externos suprimidos; entrenamiento {(_namTrainingCancellation is null ? "detenido" : "en curso")}; último NAM generado {(string.IsNullOrWhiteSpace(_lastTrainedNamPath) ? "ninguno" : Path.GetFileName(_lastTrainedNamPath))}.");
         text.AppendLine($"Memoria: administrada {managedMb} MB; proceso {processMb} MB; GC 0/1/2: {GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)}");
         string looperDiagnosticState = _engine.IsLoopRecording
             ? $"grabando primera vuelta desde {CurrentLoopCaptureSourceName}"

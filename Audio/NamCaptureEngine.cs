@@ -71,6 +71,9 @@ internal sealed class NamCaptureEngine : IDisposable
             throw new InvalidOperationException("El archivo de entrenamiento es demasiado corto.");
 
         float attenuationDb = Math.Clamp(float.IsFinite(request.SendAttenuationDb) ? request.SendAttenuationDb : -30f, -60f, 0f);
+        if (!request.LevelTest && MathF.Abs(attenuationDb) > 0.01f)
+            throw new InvalidOperationException(
+                "La captura completa NAM exige 0 dB de atenuación digital. Use la atenuación solamente para pruebas de nivel y ajuste el nivel final con el control físico Output o una caja de reamp.");
         float sendGain = MathF.Pow(10f, attenuationDb / 20f);
         float[] sent = new float[targetFrames];
         for (int i = 0; i < sent.Length; i++)

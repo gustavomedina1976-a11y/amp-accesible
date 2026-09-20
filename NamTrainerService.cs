@@ -404,59 +404,65 @@ def estimate_v3_latency_accessible(output_path):
     lookahead = 1000
     lookback = 10000
 
-    noise = np.asarray(y[noise_start:noise_end], dtype=np.float64)
+    noise = np.abs(np.asarray(y[noise_start:noise_end], dtype=np.float64))
+    background_peak = float(np.max(noise)) if len(noise) else 0.0
     background_rms = float(np.sqrt(np.mean(np.square(noise)))) if len(noise) else 0.0
     global_peak = float(np.max(np.abs(y))) if len(y) else 0.0
+    margin = max(1.0e-5, background_peak * 0.05)
+    threshold = max(background_peak + margin, background_rms * 6.0)
 
     delays = []
-    amplitudes = []
+    pulse_peaks = []
+    scans = []
 
     for position in expected:
         start = max(0, position - lookahead)
         stop = min(len(y), position + lookback)
-        window = np.abs(np.asarray(y[start:stop], dtype=np.float64))
+        signed = np.asarray(y[start:stop], dtype=np.float64)
+        window = np.abs(signed)
+        scans.append(signed)
         if len(window) == 0:
             user_fail("No se pudo analizar la ventana de pulsos de calibración NAM.")
 
-        index = int(np.argmax(window))
-        amplitudes.append(float(window[index]))
-        delays.append((start + index) - position)
+        pulse_peak = float(np.max(window))
+        pulse_peaks.append(pulse_peak)
+        triggered = np.where(window > threshold)[0]
+        if len(triggered) == 0:
+            user_fail(
+                "No se detectó el frente de uno de los pulsos V3 por encima del ruido. "
+                f"Umbral {dbfs(threshold):.1f} dBFS; pico del pulso {dbfs(pulse_peak):.1f} dBFS; "
+                f"ruido RMS {dbfs(background_rms):.1f} dBFS. "
+                "Repita la captura completa con atenuación digital 0 dB y ajuste el nivel con Output físico o caja de reamp."
+            )
+        first = int(triggered[0])
+        delays.append(first - lookahead)
 
     spread = max(delays) - min(delays)
-    pulse_peak = min(amplitudes)
-    snr_ratio = pulse_peak / max(background_rms, 1.0e-12)
+    weakest_peak = min(pulse_peaks)
+    snr_ratio = weakest_peak / max(background_rms, 1.0e-12)
     snr_db = 20.0 * np.log10(max(snr_ratio, 1.0e-12))
 
-    print(
-        "GDM_STATUS=Calibración accesible V3: "
-        f"pulsos {dbfs(pulse_peak):.1f} dBFS; "
-        f"ruido RMS {dbfs(background_rms):.1f} dBFS; "
-        f"relación {snr_db:.1f} dB; "
-        f"delays {delays[0]} y {delays[1]} muestras.",
-        flush=True,
-    )
-
     if global_peak >= 0.999:
-        user_fail(
-            "La captura presenta clipping. Repita la captura bajando la ganancia de retorno."
-        )
+        user_fail("La captura presenta clipping. Repita la captura bajando la ganancia de retorno.")
 
     if spread > 20:
+        average_scan = np.mean(np.stack(scans), axis=0)
+        average_triggered = np.where(np.abs(average_scan) > threshold)[0]
+        average_delay = None if len(average_triggered) == 0 else int(average_triggered[0]) - lookahead
+        extra = "" if average_delay is None else f"; promedio detectado {average_delay} muestras"
         user_fail(
-            "Los dos pulsos de calibración no dan una latencia consistente. "
-            f"Se midieron {delays[0]} y {delays[1]} muestras. "
-            "Revise la conexión de retorno, desactive gate, delay, chorus y reverb del amplificador "
-            "o de la cadena de captura, y repita la captura."
+            "Los primeros frentes de los dos pulsos V3 no coinciden con suficiente precisión. "
+            f"Se midieron {delays[0]} y {delays[1]} muestras; diferencia {spread} muestras{extra}. "
+            "No se forzará una latencia. Repita la captura completa con 0 dB digital y sin modificar controles durante la toma."
         )
 
-    if pulse_peak < 1.0e-5 or snr_ratio < 6.0:
-        user_fail(
-            "La respuesta a los pulsos de calibración es demasiado débil para entrenar con seguridad. "
-            f"Pulsos {dbfs(pulse_peak):.1f} dBFS; ruido {dbfs(background_rms):.1f} dBFS; "
-            f"relación señal ruido {snr_db:.1f} dB; pico global {dbfs(global_peak):.1f} dBFS. "
-            "Repita la captura aumentando gradualmente el nivel de envío o la ganancia de retorno, "
-            "sin llegar a clipping."
-        )
+    print(
+        "GDM_STATUS=Calibración accesible V3 por primer frente: "
+        f"latencias {delays[0]} y {delays[1]} muestras; diferencia {spread}; "
+        f"umbral {dbfs(threshold):.1f} dBFS; ruido RMS {dbfs(background_rms):.1f} dBFS; "
+        f"relación {snr_db:.1f} dB.",
+        flush=True,
+    )
 
     latency = int(round(sum(delays) / len(delays))) - 1
     return latency

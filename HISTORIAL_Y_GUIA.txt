@@ -1,3 +1,12 @@
+Amp Accessible 2.41.90 - Captura NAM Estandar Latencia Frente JAWS
+Base estable: 2.41.89 (48cd5852).
+- La captura completa exige 0 dB de atenuacion digital para conservar exactamente el input oficial NAM.
+- La atenuacion menos 60 a 0 dB queda solo para pruebas de nivel; el nivel final se ajusta con Output fisico o caja de reamp.
+- El motor de captura bloquea tambien cualquier captura completa distinta de 0 dB como segunda proteccion.
+- La latencia accesible V3 deja de usar el pico maximo y detecta el primer frente que supera un umbral por encima del ruido.
+- Los dos pulsos deben coincidir dentro de 20 muestras; si no coinciden no se fuerza una latencia.
+- Figure 1 permanece suprimida.
+- No cambia DSP, amplificadores, NAM de reproduccion, IR, efectos, presets, escenas, perfiles, Loopback ni acompanamiento.
 Amp Accessible 2.41.89 - Latencia NAM Accesible Sin Figure JAWS
 Base estable: 2.41.88 (4d3f5e20).
 - Corrige el bloqueo del entrenamiento en la ventana externa Figure 1 de Matplotlib.
