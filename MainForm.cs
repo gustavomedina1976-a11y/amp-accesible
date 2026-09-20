@@ -8524,7 +8524,7 @@ public sealed class MainForm : Form, IMessageFilter
             ? CurrentLoopCaptureSourceName
             : "rig principal / Guitarra 2; selector dual en espera";
         text.AppendLine($"Looper por guitarra 2.41.31: fuente de captura = {loopSourceDiagnostic}; la selección se aplica a primera vuelta y overdub; acompañamiento global no se imprime; durante una captura activa la fuente queda bloqueada para evitar cambios a mitad de vuelta.");
-        text.AppendLine($"Entrenador NAM integrado 2.41.92: {(NamTrainerService.IsInstalled ? "instalado" : "no instalado")}; prueba previa V3 de 13 segundos con criterio oficial de pulsos y latencia; captura completa exige 0 dB digital; gráficos externos suprimidos; entrenamiento {(_namTrainingCancellation is null ? "detenido" : "en curso")}; último NAM generado {(string.IsNullOrWhiteSpace(_lastTrainedNamPath) ? "ninguno" : Path.GetFileName(_lastTrainedNamPath))}.");
+        text.AppendLine($"Entrenador NAM integrado 2.41.93: {(NamTrainerService.IsInstalled ? "instalado" : "no instalado")}; prueba V3 de 13 segundos informa latencia individual de ambos pulsos, diferencia temporal y correlación alineada; captura completa exige 0 dB digital; gráficos externos suprimidos; entrenamiento {(_namTrainingCancellation is null ? "detenido" : "en curso")}; último NAM generado {(string.IsNullOrWhiteSpace(_lastTrainedNamPath) ? "ninguno" : Path.GetFileName(_lastTrainedNamPath))}.");
         text.AppendLine($"Memoria: administrada {managedMb} MB; proceso {processMb} MB; GC 0/1/2: {GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)}");
         string looperDiagnosticState = _engine.IsLoopRecording
             ? $"grabando primera vuelta desde {CurrentLoopCaptureSourceName}"

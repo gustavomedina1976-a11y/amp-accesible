@@ -247,11 +247,14 @@ internal sealed class NamCaptureEngine : IDisposable
             if (absolute > backgroundPeak) backgroundPeak = absolute;
             noiseSquares += recorded[i] * recorded[i];
         }
+
         double noiseRms = Math.Sqrt(noiseSquares / (noiseEnd - noiseStart));
         float triggerThreshold = Math.Max(backgroundPeak + 0.0003f, 1.001f * backgroundPeak);
 
+        float[][] scans = { new float[scanLength], new float[scanLength] };
         double[] average = new double[scanLength];
         float[] pulsePeaks = new float[2];
+
         for (int p = 0; p < blips.Length; p++)
         {
             int start = blips[p] - lookahead;
@@ -259,6 +262,7 @@ internal sealed class NamCaptureEngine : IDisposable
             for (int j = 0; j < scanLength; j++)
             {
                 float sample = recorded[start + j];
+                scans[p][j] = sample;
                 average[j] += sample / 2.0;
                 float absolute = MathF.Abs(sample);
                 if (absolute > pulsePeak) pulsePeak = absolute;
@@ -267,6 +271,54 @@ internal sealed class NamCaptureEngine : IDisposable
         }
 
         static double Db(double v) => v > 1.0e-12 ? 20.0 * Math.Log10(v) : -120.0;
+
+        int[] firstIndividual = { -1, -1 };
+        for (int p = 0; p < 2; p++)
+        {
+            for (int j = 0; j < scanLength; j++)
+            {
+                if (MathF.Abs(scans[p][j]) > triggerThreshold)
+                {
+                    firstIndividual[p] = j;
+                    break;
+                }
+            }
+        }
+
+        int delay1 = firstIndividual[0] >= 0 ? firstIndividual[0] - lookahead : int.MinValue;
+        int delay2 = firstIndividual[1] >= 0 ? firstIndividual[1] - lookahead : int.MinValue;
+        int delayDifference = firstIndividual[0] >= 0 && firstIndividual[1] >= 0
+            ? Math.Abs(delay1 - delay2)
+            : -1;
+
+        double correlation = double.NaN;
+        if (firstIndividual[0] >= 0 && firstIndividual[1] >= 0)
+        {
+            const int correlationLength = 2048;
+            int available1 = scanLength - firstIndividual[0];
+            int available2 = scanLength - firstIndividual[1];
+            int n = Math.Min(correlationLength, Math.Min(available1, available2));
+
+            if (n >= 128)
+            {
+                double dot = 0.0;
+                double energy1 = 0.0;
+                double energy2 = 0.0;
+                for (int k = 0; k < n; k++)
+                {
+                    double a = scans[0][firstIndividual[0] + k];
+                    double b = scans[1][firstIndividual[1] + k];
+                    dot += a * b;
+                    energy1 += a * a;
+                    energy2 += b * b;
+                }
+
+                double denominator = Math.Sqrt(energy1 * energy2);
+                if (denominator > 1.0e-20)
+                    correlation = dot / denominator;
+            }
+        }
+
         double noiseDb = Db(noiseRms);
         double backgroundDb = Db(backgroundPeak);
         double p1Db = Db(pulsePeaks[0]);
@@ -274,24 +326,45 @@ internal sealed class NamCaptureEngine : IDisposable
         double thresholdDb = Db(triggerThreshold);
         double snrDb = Db(Math.Min(pulsePeaks[0], pulsePeaks[1])) - noiseDb;
 
-        if (clipped > 0)
-            return new NamCalibrationCheck(false, null,
-                $"Calibración NAM NO aprobada: hay clipping en {clipped} muestras. Pulsos {p1Db:0.0} y {p2Db:0.0} dBFS; ruido RMS {noiseDb:0.0} dBFS. Baje la ganancia de retorno.");
-
-        int first = -1;
-        for (int j = 0; j < average.Length; j++)
+        string individualSummary;
+        if (firstIndividual[0] < 0 || firstIndividual[1] < 0)
         {
-            if (Math.Abs(average[j]) > triggerThreshold) { first = j; break; }
+            individualSummary =
+                $"Detección individual: pulso 1 {(firstIndividual[0] >= 0 ? $"{delay1} muestras" : "no cruza umbral")}; " +
+                $"pulso 2 {(firstIndividual[1] >= 0 ? $"{delay2} muestras" : "no cruza umbral")}.";
+        }
+        else
+        {
+            string correlationText = double.IsNaN(correlation)
+                ? "no disponible"
+                : correlation.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture);
+            individualSummary =
+                $"Detección individual: pulso 1 {delay1} muestras; pulso 2 {delay2} muestras; " +
+                $"diferencia {delayDifference} muestras; correlación alineada {correlationText}.";
         }
 
-        if (first < 0)
+        if (clipped > 0)
             return new NamCalibrationCheck(false, null,
-                $"Calibración NAM NO aprobada. El criterio oficial no detecta los dos pulsos V3. Pulsos {p1Db:0.0} y {p2Db:0.0} dBFS; ruido RMS {noiseDb:0.0} dBFS; ruido pico {backgroundDb:0.0} dBFS; umbral oficial {thresholdDb:0.0} dBFS; relación aproximada {snrDb:0.0} dB. Suba el envío físico hacia el amplificador y baje proporcionalmente la ganancia de retorno, sin producir clipping, y repita solo esta prueba de 13 segundos.");
+                $"Calibración NAM NO aprobada: hay clipping en {clipped} muestras. {individualSummary} Pulsos {p1Db:0.0} y {p2Db:0.0} dBFS; ruido RMS {noiseDb:0.0} dBFS.");
 
-        int delay = first - lookahead;
+        int firstAverage = -1;
+        for (int j = 0; j < average.Length; j++)
+        {
+            if (Math.Abs(average[j]) > triggerThreshold)
+            {
+                firstAverage = j;
+                break;
+            }
+        }
+
+        if (firstAverage < 0)
+            return new NamCalibrationCheck(false, null,
+                $"Calibración NAM NO aprobada. El promedio oficial no cruza el umbral. {individualSummary} Pulsos {p1Db:0.0} y {p2Db:0.0} dBFS; ruido RMS {noiseDb:0.0} dBFS; ruido pico {backgroundDb:0.0} dBFS; umbral oficial {thresholdDb:0.0} dBFS; relación aproximada {snrDb:0.0} dB. No cambie niveles todavía: informe este resultado para decidir si hay desalineación temporal o cancelación entre los dos pulsos.");
+
+        int delay = firstAverage - lookahead;
         int latency = delay - 1;
         return new NamCalibrationCheck(true, latency,
-            $"Calibración NAM APROBADA. El criterio oficial detecta los pulsos V3. Latencia preliminar {latency} muestras; pulsos {p1Db:0.0} y {p2Db:0.0} dBFS; ruido RMS {noiseDb:0.0} dBFS; umbral oficial {thresholdDb:0.0} dBFS; relación aproximada {snrDb:0.0} dB. Puede iniciar la captura completa sin cambiar ningún control físico.");
+            $"Calibración NAM APROBADA. Latencia preliminar {latency} muestras. {individualSummary} Pulsos {p1Db:0.0} y {p2Db:0.0} dBFS; ruido RMS {noiseDb:0.0} dBFS; umbral oficial {thresholdDb:0.0} dBFS; relación aproximada {snrDb:0.0} dB. Puede iniciar la captura completa sin cambiar ningún control físico.");
     }
 
     public void RequestStop()
